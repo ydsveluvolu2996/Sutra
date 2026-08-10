@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState, type ReactNode } from "react";
 import {
   describeLatestCollection,
   describeLiveSyncFailure,
@@ -44,6 +44,7 @@ import {
   WizardStepRail,
   type WizardStep,
 } from "./onboard-wizard-chrome";
+import { ConnectProviderGrid } from "./connect-provider-grid";
 import { ONBOARDING_ROLE_ALLOWED_ACTION_COUNT, ONBOARDING_ROLE_CAPABILITIES } from "../../lib/aws-onboarding-role-capabilities";
 import { GlyphIcon } from "../components/nav-icon";
 
@@ -268,6 +269,40 @@ function forgetHandoffDraft(operationId: string): void {
   }
 }
 
+/**
+ * The deployment and lifecycle surface for one connection.
+ *
+ * While a connection is still being set up, this content *is* the page, so it
+ * renders inline. Once the trust is live the same content stays true and stays
+ * reachable -- revalidating, re-registering and offboarding are all still real
+ * -- but it is no longer what anyone opened this page to do. Left inline it
+ * buries the next action under a wall of finished work: a step rail stalled
+ * mid-journey, a deployment checklist for a stack that already exists, a notice
+ * that a handoff nobody is waiting on has closed.
+ *
+ * So it collapses behind one disclosure. Nothing is removed and nothing moves
+ * to another page; the operator who needs it opens it, and the operator adding
+ * their next account never sees it.
+ */
+function ConnectionWorkArea({
+  children,
+  collapsed,
+}: {
+  readonly children: ReactNode;
+  readonly collapsed: boolean;
+}) {
+  if (!collapsed) return <>{children}</>;
+  return (
+    <details className="onboard-advanced onboard-connection-details">
+      <summary className="onboard-advanced-summary">
+        <span>Connection details and trust lifecycle</span>
+        <GlyphIcon className="nav-group-chevron" name="chevron" size={11} />
+      </summary>
+      {children}
+    </details>
+  );
+}
+
 export function OnboardAccount() {
   const { state, health, loading, refresh } = usePilotState();
   const { session } = useSession();
@@ -360,6 +395,14 @@ export function OnboardAccount() {
     : connection?.roleArn || credentialsRegistered ? 3 : liveConnection ? 2 : 1;
   const enteringAccessKeys = Boolean(credentialConnection)
     || (!liveConnection && connectionMethod === "static_credentials");
+  // Onboarding is finished for this connection once the trust is live. Past that
+  // point the page is no longer a wizard, and presenting one -- a step rail
+  // stalled at "Step 2 of 4", a deployment checklist for a stack that already
+  // exists, a closed-handoff notice -- describes work nobody has left to do. The
+  // operational surface still exists below, one disclosure away, because
+  // revalidating and offboarding remain real; it just stops being the page.
+  const connectionSetupComplete = liveConnection !== null
+    && (liveConnection.status === "active" || liveConnection.status === "disabled");
   // The rail states what each step actually proves, so an operator can see why
   // a step exists before reaching it. Step 2's contract differs by grant path:
   // a role is deployed in the customer account, access keys are handed over.
@@ -836,8 +879,11 @@ export function OnboardAccount() {
 
       <div className="onboard-layout">
         <section className="panel onboard-panel">
-          <div className="wiz-layout">
-            <WizardStepRail current={currentStep} steps={wizardSteps} />
+          {/* The rail is wayfinding for work in progress. Once the trust is
+              live there is no next step to point at, so it goes away rather
+              than sitting frozen on a finished journey. */}
+          <div className={connectionSetupComplete ? "wiz-body" : "wiz-layout"}>
+            {connectionSetupComplete ? null : <WizardStepRail current={currentStep} steps={wizardSteps} />}
             <div className="wiz-body">
 
           {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Checking the AWS workspace…</div> : null}
@@ -1036,6 +1082,26 @@ export function OnboardAccount() {
 
           {connection ? (
             <>
+              {/* A finished connection gets a finished answer, not a wizard.
+                  What an operator wants here next is almost always another
+                  account, so that is what the page offers. */}
+              {connectionSetupComplete ? (
+                <>
+                  <div className="onboard-connected" role="status">
+                    <p className="eyebrow">Connected</p>
+                    <h2>{connection.customerName} is connected to AWS</h2>
+                    <p>
+                      AWS account <code>{connection.awsAccountId}</code> · {trustHealth?.label ?? "trust recorded"}.
+                      {" "}Collection health, inventory and evidence live on the connection health page.
+                    </p>
+                    <div className="heading-actions">
+                      <a className="button button-secondary" href="/connection-health">Open connection health</a>
+                    </div>
+                  </div>
+                  <ConnectProviderGrid heading="Connect another cloud account" />
+                </>
+              ) : null}
+              <ConnectionWorkArea collapsed={connectionSetupComplete}>
               <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below with the selected deployment method. Sutra never creates customer access keys, and this recommended role method stores no long-lived customer secret at all. (Only the optional access-key onboarding method stores customer-supplied keys, encrypted in the collector.)</p></div>
               <div className="connection-contract" aria-label="AWS connection contract">
                 <div><small>Customer</small><strong>{connection.customerName}</strong><span>{connection.awsAccountId} · {connection.partition}</span></div>
@@ -1147,11 +1213,29 @@ export function OnboardAccount() {
                 {!connectionOffboarded ? <div className="inline-warning"><strong>ExternalId rotation is intentionally unavailable.</strong><span>This deployment will not overwrite active trust until a two-phase workflow can verify the new customer policy and prove the old value is denied. Offboard and revoke the customer stack if immediate replacement is required.</span></div> : null}
                 {confirmingOffboard && !connectionOffboarded ? <div className="offboard-confirmation" role="group" aria-label="Confirm AWS trust offboarding"><strong>Confirm permanent AWS trust removal</strong><p>Enter AWS account ID <code>{connection.awsAccountId}</code> and a fresh authenticator code. Sutra will retain CMDB and audit evidence, but this connection cannot be reactivated. This does not revoke the customer IAM role; delete its stack or remove its trust separately in AWS.</p><input aria-label="AWS account ID confirmation" inputMode="numeric" maxLength={12} value={offboardConfirmation} onChange={(event) => setOffboardConfirmation(event.target.value.replace(/\D/gu, ""))} /><input aria-label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={offboardStepUpCode} onChange={(event) => setOffboardStepUpCode(event.target.value.replace(/\D/gu, ""))} /><div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => { setConfirmingOffboard(false); setOffboardConfirmation(""); setOffboardStepUpCode(""); }}>Cancel</button><button className="button button-danger" type="button" disabled={busy !== null || offboardConfirmation !== connection.awsAccountId || !/^\d{6}$/u.test(offboardStepUpCode)} onClick={() => void offboardConnection()}>{busy === "offboard" ? "Removing AWS trust…" : "Verify & confirm offboarding"}</button></div></div> : null}
               </section>
+              </ConnectionWorkArea>
             </>
           ) : null}
 
           {credentialConnection ? (
             <>
+              {connectionSetupComplete ? (
+                <>
+                  <div className="onboard-connected" role="status">
+                    <p className="eyebrow">Connected</p>
+                    <h2>{credentialConnection.customerName} is connected to AWS</h2>
+                    <p>
+                      AWS account <code>{credentialConnection.awsAccountId}</code> · access keys registered.
+                      {" "}Collection health, inventory and evidence live on the connection health page.
+                    </p>
+                    <div className="heading-actions">
+                      <a className="button button-secondary" href="/connection-health">Open connection health</a>
+                    </div>
+                  </div>
+                  <ConnectProviderGrid heading="Connect another cloud account" />
+                </>
+              ) : null}
+              <ConnectionWorkArea collapsed={connectionSetupComplete}>
               <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Enter and register the customer access keys</h2><p>Sutra sends the keys once over this authenticated session to its collector, which proves the AWS account with GetCallerIdentity and stores them encrypted. With this method the collector does store the customer-supplied keys; the IAM role method remains the recommended default. Keys are never echoed back, logged, or kept in this browser.</p></div>
               <div className="connection-contract" aria-label="AWS connection contract">
                 <div><small>Customer</small><strong>{credentialConnection.customerName}</strong><span>{credentialConnection.awsAccountId} · {credentialConnection.partition}</span></div>
@@ -1190,6 +1274,7 @@ export function OnboardAccount() {
                 <div className="inline-warning"><strong>Rotate by re-submitting new keys.</strong><span>Create a new access key on the same dedicated IAM user, submit it through the form above, then deactivate and delete the old key in AWS IAM. Sutra replaces the stored encrypted keys after verification and never displays either value.</span></div>
                 {confirmingOffboard ? <div className="offboard-confirmation" role="group" aria-label="Confirm access-key offboarding"><strong>Confirm permanent access-key removal</strong><p>Enter AWS account ID <code>{credentialConnection.awsAccountId}</code> and a fresh authenticator code. Sutra will retain CMDB and audit evidence, but this connection cannot be reactivated. This does not deactivate the customer&apos;s IAM access keys; deactivate and delete them separately in AWS IAM.</p><input aria-label="AWS account ID confirmation" inputMode="numeric" maxLength={12} value={offboardConfirmation} onChange={(event) => setOffboardConfirmation(event.target.value.replace(/\D/gu, ""))} /><input aria-label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={offboardStepUpCode} onChange={(event) => setOffboardStepUpCode(event.target.value.replace(/\D/gu, ""))} /><div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => { setConfirmingOffboard(false); setOffboardConfirmation(""); setOffboardStepUpCode(""); }}>Cancel</button><button className="button button-danger" type="button" disabled={busy !== null || offboardConfirmation !== credentialConnection.awsAccountId || !/^\d{6}$/u.test(offboardStepUpCode)} onClick={() => void offboardConnection()}>{busy === "offboard" ? "Removing access keys…" : "Verify & confirm offboarding"}</button></div></div> : null}
               </section>
+              </ConnectionWorkArea>
             </>
           ) : null}
 

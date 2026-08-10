@@ -12,16 +12,26 @@ const [shell, strip, hook, accountMenu] = await Promise.all([
   readFile(resolve(root, "app/components/account-menu.tsx"), "utf8"),
 ]);
 
-test("the guided chrome applies only to trial workspaces and never to unknown progress", () => {
-  // The hook is enabled by the org plan, not by a guess.
-  assert.match(shell, /useOnboarding\(session\.organization\.plan === "trial"\)/u);
-  // Guiding requires known-and-incomplete progress: null (unknown) shows the
-  // normal shell, and a completed flow removes the chrome entirely.
-  assert.match(shell, /onboarding\.progress !== null\s*\n\s*&& !onboarding\.progress\.completed/u);
+test("the progress strip stays trial-scoped and never runs on unknown progress", () => {
+  // The strip is the trial's guided journey, so it stays keyed to the plan and
+  // to known-and-incomplete progress: null (unknown) shows the normal shell.
+  assert.match(shell, /const onboardingGuiding = session\.organization\.plan === "trial"\s*\n\s*&& onboardingProgress !== null\s*\n\s*&& !onboardingProgress\.completed/u);
   // A disabled hook fetches nothing at all.
   assert.match(hook, /if \(!enabled\) return undefined;/u);
   // Unknown stays unknown -- a failed read never overwrites known progress.
   assert.match(hook, /loaded !== null\) setProgress\(loaded\)/u);
+});
+
+test("the hard gate is about having connected, not about the plan or the goals", () => {
+  // Any workspace with no connection has nothing in its dashboards to show, so
+  // the gate is plan-independent rather than trial-only.
+  assert.match(shell, /const onboardingUnconnected = onboardingProgress !== null && !onboardingProgress\.steps\.connect/u);
+  assert.doesNotMatch(shell, /onboardingUnconnected[^\n]*plan === "trial"/u);
+  // Gating on full completion instead would lock an established workspace out
+  // of its own dashboards for never having picked a goal or a name.
+  assert.doesNotMatch(shell, /const onboardingUnconnected[^\n]*\.completed/u);
+  // Unknown progress gates nothing: the flag requires a non-null read first.
+  assert.match(shell, /onboardingProgress !== null && !onboardingProgress\.steps\.connect/u);
 });
 
 test("the strip renders the three reference steps in order and hides when complete", () => {
@@ -33,7 +43,7 @@ test("the strip renders the three reference steps in order and hides when comple
 });
 
 test("the onboarding sidebar offers the three steps and no dashboard destination", () => {
-  assert.match(shell, /onboardingGuiding \? \(\s*\n\s*<aside className="sidebar sidebar-onboarding">/u);
+  assert.match(shell, /onboardingUnconnected \? \(\s*\n\s*<aside className="sidebar sidebar-onboarding">/u);
   const start = shell.indexOf('className="nav-groups nav-groups-onboarding"');
   assert.ok(start > 0, "the onboarding sidebar must render its own nav group");
   const nav = shell.slice(start, shell.indexOf("</nav>", start));
@@ -44,10 +54,10 @@ test("the onboarding sidebar offers the three steps and no dashboard destination
   assert.match(shell, /narrows presentation only/u);
 });
 
-test("an unfinished trial workspace cannot open the rest of the app", () => {
+test("a workspace that has not connected anything cannot open the rest of the app", () => {
   // Anything outside the onboarding surface is sent back to the flow, and the
   // gated page never paints while that redirect is in flight.
-  assert.match(shell, /const onboardingGated = onboardingGuiding && !isOnboardingSurface\(pathname\)/u);
+  assert.match(shell, /const onboardingGated = onboardingUnconnected && !isOnboardingSurface\(pathname\)/u);
   assert.match(shell, /if \(!onboardingGated\) return;\s*\n\s*window\.location\.replace\("\/welcome"\)/u);
   assert.match(shell, /onboardingGated\s*\n?\s*\? <div className="loading-state"/u);
   // The gate is presentation, not authorization, and says so.
