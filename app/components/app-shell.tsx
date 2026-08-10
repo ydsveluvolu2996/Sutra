@@ -15,6 +15,33 @@ import { OnboardingStrip } from "./onboarding-strip";
 const NAV_RAIL_STORAGE_KEY = "sutra.nav-rail.v1";
 
 /**
+ * Routes a trial workspace may open before it has connected anything.
+ *
+ * The onboarding flow itself, plus the routes a customer must be able to reach
+ * from inside it: their own access and settings, support, and the legal pages
+ * a signup links to. Everything else waits until onboarding completes.
+ */
+const ONBOARDING_SURFACE_PREFIXES = Object.freeze([
+  "/welcome",
+  "/onboard",
+  "/access",
+  "/settings",
+  "/contact",
+  "/docs",
+  "/status",
+  "/privacy",
+  "/terms",
+  "/mfa",
+] as const);
+
+function isOnboardingSurface(pathname: string | null): boolean {
+  if (pathname === null) return true;
+  return ONBOARDING_SURFACE_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
+  );
+}
+
+/**
  * The rail preference lives in localStorage, which is external to React, so it
  * is read through `useSyncExternalStore` rather than seeded into state by an
  * effect. That keeps the server snapshot (expanded) authoritative during
@@ -138,7 +165,23 @@ function AuthenticatedAppShell({
   // FinOps dashboard routes all declare `active="costs"`; the exact rail
   // destination is resolved from the path so the open dashboard is the one
   // marked `aria-current="page"`.
-  const activeKey = resolveActiveNavKey(active, usePathname());
+  const pathname = usePathname();
+  const activeKey = resolveActiveNavKey(active, pathname);
+  // Until a trial workspace finishes onboarding, the onboarding surface is the
+  // only surface. Dashboards appear once the flow completes -- and completion
+  // is derived from a real connection existing, so this cannot be satisfied by
+  // clicking through. Account, access and support routes stay reachable so a
+  // customer is never trapped in a flow they cannot leave or get help with.
+  //
+  // Presentation only, and deliberately so: every route this redirects away
+  // from is still server-authorized by its own capability check. A customer who
+  // types the URL is not granted anything; they are sent back to the step they
+  // have not finished. Nothing here is a security boundary.
+  const onboardingGated = onboardingGuiding && !isOnboardingSurface(pathname);
+  useEffect(() => {
+    if (!onboardingGated) return;
+    window.location.replace("/welcome");
+  }, [onboardingGated]);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [navQuery, setNavQuery] = useState("");
@@ -218,18 +261,24 @@ function AuthenticatedAppShell({
             <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
             <span><strong>Sutra</strong><small>Cloud security, woven together.</small></span>
           </Link>
-          {/* While a trial workspace is onboarding, the sidebar offers Home and
-              nothing else -- the guided flow owns the journey, and a hundred
-              destinations before the first connection is noise, not product.
+          {/* While a trial workspace is onboarding, the sidebar offers the
+              onboarding steps and nothing else -- the guided flow owns the
+              journey, and a hundred destinations before the first connection is
+              noise, not product. Home is deliberately absent: the dashboards it
+              leads to do not exist for this workspace yet, so linking to them
+              would offer an empty room.
+
               Capability gating is untouched: this narrows presentation only,
               and every route stays server-authorized. */}
           <nav aria-label="Primary navigation" className="nav-groups nav-groups-onboarding">
+            <Link className="nav-item" href="/welcome#goals">Choose your goals</Link>
+            <Link className="nav-item" href="/welcome#name">Share the name</Link>
             <Link
-              aria-current={activeKey === "overview" ? "page" : undefined}
+              aria-current={activeKey === "onboard" ? "page" : undefined}
               className="nav-item"
-              href={scopedWorkspaceHref("/dashboard", selectedConnectionId)}
+              href="/welcome#connect"
             >
-              Home
+              Connect your infrastructure
             </Link>
           </nav>
           <div className="sidebar-spacer" />
@@ -367,7 +416,14 @@ function AuthenticatedAppShell({
             renders no sidebar body to carry it. Silence here would leave the
             operator believing they had signed out while the session is live. */}
         {signOutError ? <p className="shell-error" role="alert">{signOutError}</p> : null}
-        <div className="content-wrap">{children}</div>
+        {/* A gated route never paints its page. The redirect above is already
+            running; rendering the dashboard for one frame first would flash
+            content this workspace has not unlocked. */}
+        <div className="content-wrap">
+          {onboardingGated
+            ? <div className="loading-state" role="status"><span className="loading-spinner" />Returning to setup…</div>
+            : children}
+        </div>
         <footer className="app-footer">
           <span>Sutra · CNAPP for managed service providers</span>
           <span>Authenticated operators · tenant-scoped access · deterministic posture checks</span>

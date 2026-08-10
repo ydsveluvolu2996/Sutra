@@ -6,6 +6,8 @@ import test from "node:test";
 const root = resolve(import.meta.dirname, "..");
 const flow = await readFile(resolve(root, "app/welcome/welcome-flow.tsx"), "utf8");
 const goals = await readFile(resolve(root, "lib/onboarding-goals.ts"), "utf8");
+const grid = await readFile(resolve(root, "app/onboard/connect-provider-grid.tsx"), "utf8");
+const providers = await readFile(resolve(root, "lib/onboarding-providers.ts"), "utf8");
 
 test("the goal cards cover the exact catalog, no more, no less", () => {
   for (const id of ["cmdb", "finops", "vulnerabilities"]) {
@@ -26,13 +28,42 @@ test("both mutating steps write through the API and announce the change", () => 
   assert.match(flow, /sutra:session-changed/u);
 });
 
-test("the connect step is derived-only and AWS is the only live provider", () => {
+test("the connect step is derived-only and hands off to the provider hub", () => {
   // The page never marks connect done itself; it reads derived progress.
   assert.match(flow, /progress\?\.steps\.connect \?/u);
   assert.doesNotMatch(flow, /patchOnboarding\(\{[^}]*connect/u);
-  // One functional provider path; roadmap providers render no Connect control
-  // and no invented object counts.
-  assert.match(flow, /href="\/onboard">Connect AWS<\/Link>/u);
-  assert.match(flow, /data-available="false"[\s\S]{0,200}Not yet available/u);
-  assert.doesNotMatch(flow, /Connect Azure|Connect GCP|Connect Oracle|supports over \d/u);
+  // The provider cards live in one shared hub so the welcome flow and the
+  // connect page cannot drift into offering different providers.
+  assert.match(flow, /<ConnectProviderGrid heading="Connect your infrastructure to track every asset, everywhere"/u);
+});
+
+test("one step is on screen at a time, and the strip's hash selects which", () => {
+  for (const step of ["goals", "name", "connect"]) {
+    assert.match(flow, new RegExp(`step === "${step}" \\?`, "u"));
+  }
+  // The step shown follows progress unless the customer navigated explicitly.
+  assert.match(flow, /const step = requestedStep \?\? firstIncompleteStep\(progress\)/u);
+  assert.match(flow, /addEventListener\("hashchange", apply\)/u);
+});
+
+test("only AWS offers a Connect control, and no card invents an object count", () => {
+  // Exactly one provider has a live path, and it is AWS.
+  const live = [...providers.matchAll(/connectHref: "([^"]+)"/gu)].map((match) => match[1]);
+  assert.deepEqual(live, ["/onboard"]);
+  assert.match(providers, /id: "aws",[\s\S]{0,400}connectHref: "\/onboard"/u);
+  // Every other provider states a reason instead of offering a button.
+  for (const id of ["azure", "gcp", "oracle"]) {
+    assert.match(providers, new RegExp(`id: "${id}",[\\s\\S]{0,400}connectHref: null`, "u"));
+  }
+  assert.equal([...providers.matchAll(/unavailableReason: null/gu)].length, 1);
+  // The grid renders a Connect control only on the available branch.
+  assert.match(grid, /available && provider\.connectHref !== null \?/u);
+  assert.match(grid, /Connect \{provider\.name\}/u);
+  assert.match(grid, /connect-provider-blocked">\s*Not yet available/u);
+  // No borrowed object counts, and no borrowed customer logos either.
+  assert.doesNotMatch(providers, /supports over \d/u);
+  assert.doesNotMatch(grid, /supports over \d/u);
+  for (const source of [grid, providers]) {
+    assert.doesNotMatch(source, /Coca-Cola|Salesforce|NASA|Cisco|Charles Schwab|New York Life/u);
+  }
 });
