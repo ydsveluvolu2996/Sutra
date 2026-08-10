@@ -116,8 +116,13 @@ test("the open dashboard is the item marked aria-current, gating untouched", () 
   assert.equal(resolveActiveNavKey("costs", null), "costs");
   assert.equal(groupContainsActiveItem(finops, finopsDashboardNavKey("ADV-05")), true);
 
-  // The rail marks the resolved destination, and the group opens for it.
-  assert.match(shellSource, /resolveActiveNavKey\(active, usePathname\(\)\)/u);
+  // The rail marks the resolved destination, and the group opens for it. What
+  // matters is that the live path feeds the resolution -- the declared `active`
+  // prop alone cannot tell one FinOps dashboard from another -- not whether the
+  // hook is called inline or read from a local, which it is once anything else
+  // in the shell also needs the path.
+  assert.match(shellSource, /resolveActiveNavKey\(active, (?:usePathname\(\)|pathname)\)/u);
+  assert.match(shellSource, /usePathname\(\)/u);
   assert.match(shellSource, /aria-current=\{isActive \? "page" : undefined\}/u);
   assert.match(shellSource, /aria-current=\{activeKey === item\.key \? "page" : undefined\}/u);
   // Native details/summary keeps the subsections keyboard operable.
