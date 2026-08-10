@@ -41,7 +41,6 @@ import {
   WizardCodeBlock,
   WizardPermissionToggle,
   WizardRadioGroup,
-  WizardSection,
   WizardStepRail,
   type WizardStep,
 } from "./onboard-wizard-chrome";
@@ -831,7 +830,7 @@ export function OnboardAccount() {
   return (
     <>
       <section className="page-heading onboard-heading">
-        <div><p className="eyebrow">Secure AWS connection</p><h1>Onboard one AWS account</h1><p className="page-subtitle">Create a customer-owned read-only role, prove the ExternalId boundary, then publish a complete CMDB snapshot.</p></div>
+        <div><p className="eyebrow">Secure AWS connection</p><h1>Connect your infrastructure</h1><p className="page-subtitle">Create a customer-owned read-only role, prove the ExternalId boundary, then publish a complete CMDB snapshot.</p></div>
         <span className={`status-pill ${collectorMode === "live" ? "status-positive" : "status-medium"}`}>{collectorMode === "live" ? "Live collector" : collectorMode === "fixture" ? "Simulations only" : "Collector checking"}</span>
       </section>
 
@@ -849,44 +848,10 @@ export function OnboardAccount() {
 
           {!loading && !liveConnection && collectorMode === "live" && canCreateConnection ? (
             <>
-              <div className="onboard-copy"><p className="eyebrow">Step 1 of 4</p><h2>Create the connection contract</h2><p>Sutra binds a platform-generated ExternalId to this customer and account. A lost response can recover the same actor-bound value only until the customer role is registered.</p></div>
-              <form className="onboard-form" onSubmit={createConnection}>
-                <WizardSection
-                  title="Choose Your Setup"
-                  description="Bind this connection to one approved customer workspace and one AWS account."
-                >
-                <label><span>Customer workspace</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer or company name" required /><small>Each connection is bound to one approved customer workspace and one AWS account.</small></label>
-                <div className="form-grid">
-                  <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
-                  <label><span>AWS partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">Commercial (aws)</option><option value="aws-us-gov">GovCloud</option><option value="aws-cn">China</option></select><small>The collector principal and role must use the same partition.</small></label>
-                </div>
-                {/* Scope is single-account today. Organization-wide assumption
-                    across member accounts is a collector capability, not a form
-                    field, so it is shown as unavailable rather than offered and
-                    silently ignored. */}
-                <WizardRadioGroup
-                  legend="Connector scope"
-                  name="connector-scope"
-                  onChange={() => undefined}
-                  options={[
-                    { id: "account", label: "Account", description: "Scan the single AWS account entered above." },
-                    {
-                      id: "organization",
-                      label: "Organization",
-                      description: "Scan an AWS organization and its member accounts from one role.",
-                      unavailable: "The collector assumes one customer role per account. Onboard member accounts individually until organization-wide assumption ships.",
-                    },
-                  ]}
-                  value="account"
-                />
-                <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
-                {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
-                </WizardSection>
-                <WizardSection
-                  title="Deploy"
-                  description="Sutra never creates customer access keys. The recommended paths store no long-lived customer secret at all."
-                >
-                <p className="onboard-guide-link">New here? <a href="/onboard/guide">Read the AWS quick-start guide</a>.</p>
+              <form className="onboard-form aws-account-card" onSubmit={createConnection}>
+                <h2 className="aws-account-card-title">New AWS Account</h2>
+                <label><span>Account Name</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer or company name" required /><small>Each connection is bound to one approved customer workspace and one AWS account.</small></label>
+                <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
                 {/* The reference presents authentication as two tabs. The tab
                     switches the SAME connectionMethod state the radio cards
                     set, so the wire contract is untouched: IAM Role shows the
@@ -911,6 +876,51 @@ export function OnboardAccount() {
                     Access & Secret Keys
                   </button>
                 </div>
+                <p className="onboard-guide-link">Check Sutra <a href="/onboard/guide">AWS Start Guide</a>.</p>
+
+                {/* The reference form shows External ID and Role ARN as fields
+                    the customer fills in, with a shuffle button that mints a new
+                    External ID on demand. Sutra cannot honour either half.
+                    The ExternalId is generated by the server, bound to this
+                    customer and this AWS account, disclosed exactly once, and
+                    never rotated on an active connection -- a client-chosen or
+                    client-reshuffled value would defeat the boundary the whole
+                    trust model rests on. So both fields keep their place and
+                    their labels, and state plainly that they fill themselves in
+                    on the next step rather than pretending to accept input. */}
+                {connectionMethod === "iam_role" ? <>
+                  <label className="contract-field"><span>External ID</span><div className="copy-field"><code className="copy-field-pending">Generated when you continue</code></div><small>Sutra generates this value, binds it to this customer and AWS account, and discloses it once. It is never chosen here, and it is never reshuffled on a connection that already has a registered role.</small></label>
+                  <label><span>Role ARN (CloudFormation stack output parameter)</span><input disabled placeholder="Paste this after the stack is created" /><small>The pre-generated template and manual download appear here once Sutra has an External ID to prefill them with.</small></label>
+                </> : null}
+
+                <label><span>Partition</span><select value={partition} onChange={(event) => setPartition(event.target.value)}><option value="aws">aws</option><option value="aws-us-gov">aws-us-gov</option><option value="aws-cn">aws-cn</option></select><small>The collector principal and role must use the same partition.</small></label>
+
+                <details className="onboard-advanced">
+                  <summary className="onboard-advanced-summary">
+                    <span>Advanced options</span>
+                    <GlyphIcon className="nav-group-chevron" name="chevron" size={11} />
+                  </summary>
+                {/* Scope is single-account today. Organization-wide assumption
+                    across member accounts is a collector capability, not a form
+                    field, so it is shown as unavailable rather than offered and
+                    silently ignored. */}
+                <WizardRadioGroup
+                  legend="Connector scope"
+                  name="connector-scope"
+                  onChange={() => undefined}
+                  options={[
+                    { id: "account", label: "Account", description: "Scan the single AWS account entered above." },
+                    {
+                      id: "organization",
+                      label: "Organization",
+                      description: "Scan an AWS organization and its member accounts from one role.",
+                      unavailable: "The collector assumes one customer role per account. Onboard member accounts individually until organization-wide assumption ships.",
+                    },
+                  ]}
+                  value="account"
+                />
+                <label><span>Region coverage</span><select value={regionSelectionMode} onChange={(event) => setRegionSelectionMode(event.target.value as AwsRegionSelectionMode)}><option value={ALL_ENABLED_AWS_REGIONS}>All account-enabled Regions (recommended)</option><option value="explicit">Only explicit Regions</option></select><small>After assuming the customer role, Sutra asks AWS which Regions are enabled and records collector coverage against those real Region names.</small></label>
+                {regionSelectionMode === "explicit" ? <label><span>Explicit regions</span><input value={regions} onChange={(event) => setRegions(event.target.value)} placeholder="us-east-1, ap-south-1" required /><small>Comma-separated AWS Regions. Sutra fails validation if any selected Region is not enabled; global IAM is collected once.</small></label> : null}
                 <fieldset className="onboard-paths">
                   <legend>How will the customer grant access?</legend>
                   {ONBOARD_PATHS.filter((path) => connectionMethod === "static_credentials"
@@ -1006,8 +1016,11 @@ export function OnboardAccount() {
                     </span>
                   </div>
                 )}
-                </WizardSection>
-                <button className="button button-primary onboard-submit" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Create connection contract"}</button>
+                </details>
+                <div className="aws-account-card-actions">
+                  <a className="button button-secondary" href="/welcome#connect">Select another cloud provider</a>
+                  <button className="button button-primary" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Continue"}</button>
+                </div>
               </form>
             </>
           ) : null}
@@ -1096,10 +1109,27 @@ export function OnboardAccount() {
 
               {createdRoleMode === "customer_managed" ? <div className="inline-warning"><strong>Unsafe existing roles are rejected.</strong><span>Sutra accepts only the selected <code>/sutra/…/</code> path and role name with one exact trust statement, one reviewed inline permission contract, no attached managed policies, and the expected dedicated-role tags. Broad permissions on any reused role are not considered acceptable.</span></div> : null}
 
-              {!connectionOffboarded ? <form className="onboard-form role-registration" onSubmit={registerRole}>
-                <label><span>Customer role ARN</span><input value={effectiveRoleArn} onChange={(event) => setRoleArn(event.target.value.trim())} placeholder={created ? expectedRoleArn(created) : selectedRoleArn ?? "Dedicated role ARN"} aria-invalid={effectiveRoleArn.length > 0 && !roleValid} required /><small>{effectiveRoleArn.length === 0 ? "Paste the deployment output after the role is created." : !roleValid ? `Use the exact selected dedicated role ARN: ${selectedRoleArn ?? "unavailable"}.` : "Role ARN syntax, account, path, and name match; the server will still attest its exact trust, permissions, and tags."}</small></label>
+              {!connectionOffboarded ? <form className="onboard-form aws-account-card role-registration" onSubmit={registerRole}>
+                <h2 className="aws-account-card-title">New AWS Account</h2>
+                <label><span>Role ARN (CloudFormation stack output parameter)</span><input value={effectiveRoleArn} onChange={(event) => setRoleArn(event.target.value.trim())} placeholder={created ? expectedRoleArn(created) : selectedRoleArn ?? "Dedicated role ARN"} aria-invalid={effectiveRoleArn.length > 0 && !roleValid} required /><small>{effectiveRoleArn.length === 0 ? "Paste the deployment output after the role is created." : !roleValid ? `Use the exact selected dedicated role ARN: ${selectedRoleArn ?? "unavailable"}.` : "Role ARN syntax, account, path, and name match; the server will still attest its exact trust, permissions, and tags."}</small></label>
+                {/* The reference offers a prefilled quick-create link OR a manual
+                    download, in one sentence under this field. Both are real
+                    here, and both are conditional on facts rather than always
+                    rendered: the quick-create link exists only while the
+                    one-time handoff is open and only for the template path, so
+                    it disappears with the handoff instead of outliving it. */}
+                {createdRoleMode === "sutra_template" ? (
+                  <p className="onboard-template-links">
+                    {quickLaunchUrl === null
+                      ? <>Download <a href={AWS_CUSTOMER_ROLE_TEMPLATE_PATH} download>this template</a> to create the stack manually.</>
+                      : <>Use <a href={quickLaunchUrl} target="_blank" rel="noreferrer">this pre-generated template</a> for quicker stack creation OR download <a href={AWS_CUSTOMER_ROLE_TEMPLATE_PATH} download>this template</a> to create the stack manually.</>}
+                  </p>
+                ) : null}
                 <p className="limitation-note">Your existing MFA-verified Sutra session authorizes this step. Sutra still proves the exact AWS account, role trust, permissions, tags, and incorrect-ExternalId denial before registration commits.</p>
-                <button className="button button-secondary onboard-submit" type="submit" disabled={!roleValid || connectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Registering role…" : collectorMode === "live" ? connection.roleArn ? "Verify & update registered role" : "Verify & register customer role" : "Live collector required"}</button>
+                <div className="aws-account-card-actions">
+                  <a className="button button-secondary" href="/welcome#connect">Select another cloud provider</a>
+                  <button className="button button-primary" type="submit" disabled={!roleValid || connectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Registering role…" : collectorMode === "live" ? connection.roleArn ? "Verify & update registered role" : "Verify & register customer role" : "Live collector required"}</button>
+                </div>
               </form> : null}
 
               <div className="onboard-validation-action">

@@ -32,12 +32,33 @@ test("the strip renders the three reference steps in order and hides when comple
   assert.match(strip, /aria-current=\{current \? "step" : undefined\}/u);
 });
 
-test("the onboarding sidebar narrows presentation only and keeps Home reachable", () => {
+test("the onboarding sidebar offers the three steps and no dashboard destination", () => {
   assert.match(shell, /onboardingGuiding \? \(\s*\n\s*<aside className="sidebar sidebar-onboarding">/u);
-  // Home stays a real, scoped workspace link.
-  assert.match(shell, /nav-groups-onboarding[\s\S]{0,600}scopedWorkspaceHref\("\/dashboard", selectedConnectionId\)/u);
+  const start = shell.indexOf('className="nav-groups nav-groups-onboarding"');
+  assert.ok(start > 0, "the onboarding sidebar must render its own nav group");
+  const nav = shell.slice(start, shell.indexOf("</nav>", start));
+  assert.match(nav, /\/welcome#goals[\s\S]*\/welcome#name[\s\S]*\/welcome#connect/u);
+  // The dashboards this workspace has not unlocked are not linked to.
+  assert.doesNotMatch(nav, /scopedWorkspaceHref|\/dashboard/u);
   // Capability gating is documented as untouched -- presentation only.
   assert.match(shell, /narrows presentation only/u);
+});
+
+test("an unfinished trial workspace cannot open the rest of the app", () => {
+  // Anything outside the onboarding surface is sent back to the flow, and the
+  // gated page never paints while that redirect is in flight.
+  assert.match(shell, /const onboardingGated = onboardingGuiding && !isOnboardingSurface\(pathname\)/u);
+  assert.match(shell, /if \(!onboardingGated\) return;\s*\n\s*window\.location\.replace\("\/welcome"\)/u);
+  assert.match(shell, /onboardingGated\s*\n?\s*\? <div className="loading-state"/u);
+  // The gate is presentation, not authorization, and says so.
+  assert.match(shell, /still server-authorized by its own capability check/u);
+  // A customer inside the flow can still reach their access, settings and help.
+  const start = shell.indexOf("ONBOARDING_SURFACE_PREFIXES");
+  const allowed = shell.slice(start, shell.indexOf("] as const)", start));
+  for (const prefix of ["/welcome", "/onboard", "/access", "/settings", "/contact"]) {
+    assert.match(allowed, new RegExp(`"${prefix}"`, "u"));
+  }
+  assert.doesNotMatch(allowed, /"\/dashboard"|"\/cmdb"|"\/costs"/u);
 });
 
 test("the trial badge renders from the session plan and only for trial", () => {

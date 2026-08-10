@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useState } from "react";
 import { GlyphIcon } from "../components/nav-icon";
 
 /**
@@ -53,30 +53,6 @@ export function WizardStepRail({
         );
       })}
     </ol>
-  );
-}
-
-/**
- * A titled block inside the wizard body ("Choose Your Setup", "Deploy").
- *
- * `title` renders as an `h2` so the wizard keeps one honest heading outline
- * rather than styling paragraphs to look like headings.
- */
-export function WizardSection({
-  children,
-  description,
-  title,
-}: {
-  readonly children: ReactNode;
-  readonly description?: string;
-  readonly title: string;
-}) {
-  return (
-    <section className="wiz-section">
-      <h2 className="wiz-section-title">{title}</h2>
-      {description === undefined ? null : <p className="wiz-section-description">{description}</p>}
-      {children}
-    </section>
   );
 }
 
