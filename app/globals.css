@@ -4162,3 +4162,10 @@ button.orbit-node { font: inherit; cursor: pointer; }
    leans on them for the start guide and both template paths. */
 .onboard-guide-link a, .onboard-template-links a { color: var(--accent, #19b8a6); font-weight: 600; text-decoration: none; }
 .onboard-guide-link a:hover, .onboard-template-links a:hover { text-decoration: underline; }
+
+/* A connection that is already live states that, and gets out of the way. */
+.onboard-connected { display: flex; flex-direction: column; gap: 6px; margin-bottom: 26px; }
+.onboard-connected h2 { margin: 0; font-size: 19px; }
+.onboard-connected p { margin: 0; color: var(--text-muted, #8a93a6); font-size: 13px; }
+.onboard-connected .heading-actions { margin-top: 10px; }
+.onboard-connection-details { margin-top: 28px; }

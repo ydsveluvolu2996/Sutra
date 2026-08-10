@@ -154,13 +154,25 @@ function AuthenticatedAppShell({
   readonly children: ReactNode;
   readonly session: PublicLocalSession;
 }) {
-  // Guided onboarding applies only to trial workspaces; for everyone else the
-  // hook stays disabled and fetches nothing. Null progress renders nothing --
-  // unknown is never presented as complete or incomplete.
-  const onboarding = useOnboarding(session.organization.plan === "trial");
+  // Progress is read for every workspace, because the connection gate below is
+  // not a trial-only concern. Null progress renders nothing and gates nothing --
+  // unknown is never presented as complete or incomplete, so a failed or
+  // in-flight read leaves the app exactly as it was.
+  const onboarding = useOnboarding(true);
+  const onboardingProgress = onboarding.progress;
+  // The strip keeps guiding until all three steps are done, so a workspace that
+  // connected but never named itself still sees what is left.
   const onboardingGuiding = session.organization.plan === "trial"
-    && onboarding.progress !== null
-    && !onboarding.progress.completed;
+    && onboardingProgress !== null
+    && !onboardingProgress.completed;
+  // The hard gate is narrower, and deliberately not about the plan: a workspace
+  // that has never connected anything has nothing in its dashboards to look at,
+  // whether it is a trial or not. It is also not about the goals and name steps
+  // -- gating on full completion would lock an established workspace out of its
+  // own dashboards for never having picked a goal, which is a far worse failure
+  // than showing an empty room. Connection is the only step that changes
+  // whether the rest of the product has anything to say.
+  const onboardingUnconnected = onboardingProgress !== null && !onboardingProgress.steps.connect;
   const { state, health, loading } = usePilotState();
   // FinOps dashboard routes all declare `active="costs"`; the exact rail
   // destination is resolved from the path so the open dashboard is the one
@@ -177,7 +189,7 @@ function AuthenticatedAppShell({
   // from is still server-authorized by its own capability check. A customer who
   // types the URL is not granted anything; they are sent back to the step they
   // have not finished. Nothing here is a security boundary.
-  const onboardingGated = onboardingGuiding && !isOnboardingSurface(pathname);
+  const onboardingGated = onboardingUnconnected && !isOnboardingSurface(pathname);
   useEffect(() => {
     if (!onboardingGated) return;
     window.location.replace("/welcome");
@@ -255,7 +267,7 @@ function AuthenticatedAppShell({
 
   return (
     <div className="app-shell" data-nav={railMode ? "rail" : "expanded"}>
-      {onboardingGuiding ? (
+      {onboardingUnconnected ? (
         <aside className="sidebar sidebar-onboarding">
           <Link className="brand" href={scopedWorkspaceHref("/dashboard", selectedConnectionId)} aria-label="Sutra workspace home">
             <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>

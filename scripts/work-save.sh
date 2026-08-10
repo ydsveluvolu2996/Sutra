@@ -66,20 +66,105 @@ if ! git push origin develop; then
 fi
 
 repository_name="ydsveluvolu2996/Sutra"
-gh auth status >/dev/null
-pull_requests="$(gh api \
+
+# The work is already pushed by this point. What follows only ensures the
+# standing pull request exists -- but that is not cosmetic: CI triggers on
+# `pull_request` and on push to `main`, never on a branch push, so without an
+# open develop → main pull request the pushed commits carry no verification at
+# all and the first CI run would happen on `main`, where a green run is what
+# gates a release.
+#
+# This used to call `gh` unconditionally. On a machine without the GitHub CLI
+# the script pushed successfully and then died at `gh auth status`, which read
+# as a generic script error rather than "your CI safety net is missing" -- the
+# push looked done and the pull request silently never appeared. So the CLI is
+# now one of two transports, and the absence of both is reported for what it
+# actually costs.
+github_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+api_transport=""
+
+command -v jq >/dev/null 2>&1 || {
+  echo "jq is required to manage the standing pull request." >&2
+  exit 1
+}
+
+if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  api_transport="gh"
+elif [[ -n "${github_token}" ]] && command -v curl >/dev/null 2>&1; then
+  # Token characters are validated because the value is interpolated into a
+  # curl config below, where an embedded quote would break header framing.
+  # GitHub tokens are drawn from this alphabet, so a rejection here means a
+  # malformed value rather than a legitimate token being refused.
+  if [[ "${github_token}" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    api_transport="curl"
+  else
+    echo "GH_TOKEN/GITHUB_TOKEN contains unexpected characters and was not used." >&2
+  fi
+fi
+
+if [[ -z "${api_transport}" ]]; then
+  echo "Your work is pushed, but the standing develop → main pull request could not be checked." >&2
+  echo "Without it, develop runs no CI at all and the first CI run happens on main." >&2
+  echo "Authenticate the GitHub CLI ('gh auth login') or export GH_TOKEN, then re-run 'pnpm work:save'." >&2
+  exit 1
+fi
+
+# Both transports speak the same REST API and return the same JSON, so the pull
+# request logic below is written once. The token is fed to curl through a config
+# on stdin rather than an argument: a command line is world-readable in `ps`,
+# and a credential does not belong there.
+github_api() {
+  local method="$1" path="$2" body_file="${3:-}"
+  if [[ "${api_transport}" == "gh" ]]; then
+    if [[ -n "${body_file}" ]]; then
+      gh api --method "${method}" "${path}" --input "${body_file}"
+    else
+      gh api --method "${method}" "${path}"
+    fi
+    return
+  fi
+
+  local response status body
+  response="$(
+    {
+      printf 'url = "https://api.github.com/%s"\n' "${path}"
+      printf 'request = "%s"\n' "${method}"
+      printf 'header = "Authorization: Bearer %s"\n' "${github_token}"
+      printf 'header = "Accept: application/vnd.github+json"\n'
+      printf 'header = "X-GitHub-Api-Version: 2022-11-28"\n'
+      printf 'silent\nshow-error\n'
+      printf 'write-out = "\\n%%{http_code}"\n'
+      if [[ -n "${body_file}" ]]; then
+        printf 'header = "Content-Type: application/json"\n'
+        printf 'data-binary = "@%s"\n' "${body_file}"
+      fi
+    } | curl --config -
+  )"
+  status="${response##*$'\n'}"
+  body="${response%$'\n'*}"
+  if [[ ! "${status}" =~ ^2[0-9][0-9]$ ]]; then
+    echo "GitHub API ${method} ${path} failed with HTTP ${status}." >&2
+    jq -r '.message? // empty' <<< "${body}" >&2 || true
+    return 1
+  fi
+  printf '%s' "${body}"
+}
+
+pull_requests="$(github_api GET \
   "repos/${repository_name}/pulls?state=open&base=main&head=ydsveluvolu2996:develop&per_page=100")"
 pull_request_count="$(jq -r 'length' <<< "${pull_requests}")"
 [[ "${pull_request_count}" =~ ^[0-9]+$ ]]
 
 if [[ "${pull_request_count}" == "0" ]]; then
-  created_pull_request="$(gh api \
-    --method POST \
-    "repos/${repository_name}/pulls" \
-    -f title="develop → main" \
-    -f head=develop \
-    -f base=main \
-    -f body=$'Standing integration pull request.\n\nEvery push to develop updates this PR and runs the complete CI gate. Merge only after the user explicitly says "commit to main".')"
+  payload_file="$(mktemp)"
+  trap 'rm -f "${payload_file}"' EXIT
+  jq -n \
+    --arg title "develop → main" \
+    --arg head "develop" \
+    --arg base "main" \
+    --arg body $'Standing integration pull request.\n\nEvery push to develop updates this PR and runs the complete CI gate. Merge only after the user explicitly says "commit to main".' \
+    '{title: $title, head: $head, base: $base, body: $body}' > "${payload_file}"
+  created_pull_request="$(github_api POST "repos/${repository_name}/pulls" "${payload_file}")"
   pull_requests="$(jq -c '[.]' <<< "${created_pull_request}")"
 elif [[ "${pull_request_count}" != "1" ]]; then
   echo "Expected exactly one develop → main pull request; found ${pull_request_count}." >&2

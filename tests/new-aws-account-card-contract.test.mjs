@@ -77,3 +77,34 @@ test("the depth the reference has no room for is collapsed, not deleted", () => 
   assert.match(advanced, /legend="Connector scope"/u);
   assert.match(advanced, /Region coverage/u);
 });
+
+test("a finished connection stops being a wizard", () => {
+  // Setup completion is derived from the trust actually being live, not from
+  // clicking through the steps.
+  assert.match(source, /const connectionSetupComplete = liveConnection !== null\s*\n\s*&& \(liveConnection\.status === "active" \|\| liveConnection\.status === "disabled"\)/u);
+  // The step rail is wayfinding for work in progress, so it goes away.
+  assert.match(source, /connectionSetupComplete \? null : <WizardStepRail/u);
+  // What replaces it is a plain statement of fact plus the next real action --
+  // connecting another account -- not a stalled "Step 2 of 4".
+  assert.match(source, /className="onboard-connected" role="status"/u);
+  assert.match(source, /is connected to AWS<\/h2>/u);
+  assert.match(source, /<ConnectProviderGrid heading="Connect another cloud account"/u);
+});
+
+test("the deployment and lifecycle surface is collapsed, never deleted", () => {
+  // Both connection kinds route their dense surface through one wrapper that
+  // collapses once setup is done, so nothing is removed or moved off the page.
+  assert.equal([...source.matchAll(/<ConnectionWorkArea collapsed=\{connectionSetupComplete\}>/gu)].length, 2);
+  assert.equal([...source.matchAll(/<\/ConnectionWorkArea>/gu)].length, 2);
+  assert.match(source, /if \(!collapsed\) return <>\{children\}<\/>/u);
+  assert.match(source, /Connection details and trust lifecycle/u);
+  // The things an operator still needs after setup remain reachable inside it.
+  for (const kept of [
+    "Exact collector principal",
+    "Control or remove collector access",
+    "Offboard AWS trust",
+    "ExternalId handoff is closed",
+  ]) {
+    assert.ok(source.includes(kept), `${kept} must survive the collapse`);
+  }
+});
