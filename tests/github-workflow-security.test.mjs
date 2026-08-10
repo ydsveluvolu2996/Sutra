@@ -589,9 +589,27 @@ test("daily development helpers preserve work and the standing integration PR", 
   assert.match(save, /git rebase --abort/u);
   assert.match(save, /refs\/heads\/\$\{recovery_branch\}/u);
   assert.match(save, /pulls\?state=open&base=main&head=ydsveluvolu2996:develop/u);
-  assert.match(save, /-f head=develop/u);
-  assert.match(save, /-f base=main/u);
-  assert.match(save, /-f title="develop → main"/u);
+  // The standing pull request is still created against exactly develop → main.
+  // The request is now a JSON payload rather than `gh -f` form flags, because
+  // the same body has to serve both transports below, but the contract it
+  // states is unchanged.
+  assert.match(save, /--arg title "develop → main"/u);
+  assert.match(save, /--arg head "develop"/u);
+  assert.match(save, /--arg base "main"/u);
+  assert.match(save, /\{title: \$title, head: \$head, base: \$base, body: \$body\}/u);
+  // Exactly one standing pull request, still enforced.
+  assert.match(save, /Expected exactly one develop → main pull request/u);
+
+  // A missing GitHub CLI must not silently cost develop its CI coverage: the
+  // script falls back to the REST API, and reports the real consequence when
+  // neither transport is available rather than dying on `gh auth status`.
+  assert.match(save, /command -v gh .*&& gh auth status/u);
+  assert.match(save, /api_transport="curl"/u);
+  assert.match(save, /develop runs no CI at all/u);
+  // The token reaches curl through a config on stdin, never through argv where
+  // any local user could read it out of `ps`.
+  assert.match(save, /curl --config -/u);
+  assert.doesNotMatch(save, /curl[^\n]*-H "Authorization/u);
   assert.doesNotMatch(`${start}\n${save}`, /push --force|push -f|reset --hard/u);
   assert.match(packageJson, /"work:start": "bash scripts\/work-start\.sh"/u);
   assert.match(packageJson, /"work:save": "bash scripts\/work-save\.sh"/u);
