@@ -152,9 +152,6 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
   ) {
     issues.push(`${label} authorization prompt must be exactly select_account`);
   }
-  if (candidate.id === "google" && candidate.authorizationPrompt !== "select_account") {
-    issues.push(`${label} Google configuration must request the select_account chooser`);
-  }
   if (candidate.id !== "google" && candidate.authorizationPrompt !== undefined) {
     issues.push(`${label} authorization prompt is supported only for Google`);
   }
@@ -168,9 +165,24 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
       jwksUri: candidate.jwksUri as string,
       clientId: candidate.clientId as string,
       ...(candidate.clientSecret === undefined ? {} : { clientSecret: candidate.clientSecret as string }),
-      ...(candidate.authorizationPrompt === undefined
-        ? {}
-        : { authorizationPrompt: candidate.authorizationPrompt as "select_account" }),
+      // Google always gets the account chooser, and the default is applied here
+      // rather than demanded of the stored secret.
+      //
+      // Requiring the key instead would reject every environment provisioned
+      // before this field existed -- and because one invalid provider fails the
+      // whole list, that takes down every other provider with it. The managed
+      // SUTRA_OIDC_PROVIDERS secret is written by `sync-zoho-runtime.sh` on each
+      // EC2 release, so a hard requirement would abort the deploy that was
+      // supposed to carry the migration, and leave sign-in unavailable until
+      // someone rewrote the secret by hand.
+      //
+      // Defaulting is safe in the direction that matters: the only accepted
+      // value is `select_account` (validated above), so a config that omits it
+      // and a config that states it now resolve identically. Nothing can select
+      // a different prompt by staying silent.
+      ...(candidate.id === "google"
+        ? { authorizationPrompt: "select_account" as const }
+        : {}),
     },
     issues: [],
   };

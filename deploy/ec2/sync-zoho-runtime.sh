@@ -124,7 +124,7 @@ jq -e '
           and .[1].authorizationEndpoint == "https://accounts.google.com/o/oauth2/v2/auth"
           and .[1].tokenEndpoint == "https://oauth2.googleapis.com/token"
           and .[1].jwksUri == "https://www.googleapis.com/oauth2/v3/certs"
-          and .[1].authorizationPrompt == "select_account"
+          and ((.[1].authorizationPrompt // "select_account") == "select_account")
           and (.[1].clientId
             | type == "string" and test("^[A-Za-z0-9._-]{4,200}\\.apps\\.googleusercontent\\.com$"))
           and (.[1].clientSecret | type == "string" and length >= 8 and length <= 512)

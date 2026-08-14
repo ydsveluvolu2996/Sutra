@@ -75,16 +75,32 @@ export function buildRuntimeSecret(bundle, identityMode) {
     "jwksUri",
     "tokenEndpoint",
   ].join("\0");
-  const EXACT_GOOGLE_PROVIDER_KEYS = [
-    "authorizationEndpoint",
-    "authorizationPrompt",
-    "clientId",
-    "clientSecret",
-    "id",
-    "issuer",
-    "jwksUri",
-    "tokenEndpoint",
-  ].join("\0");
+  // `authorizationPrompt` is accepted either present-and-select_account or
+  // absent. Bundles published before the field existed omit it, and the runtime
+  // now defaults Google to the account chooser rather than rejecting them, so
+  // demanding the key here would refuse to republish a bundle the runtime is
+  // perfectly willing to serve.
+  const GOOGLE_PROVIDER_KEY_SHAPES = new Set([
+    [
+      "authorizationEndpoint",
+      "authorizationPrompt",
+      "clientId",
+      "clientSecret",
+      "id",
+      "issuer",
+      "jwksUri",
+      "tokenEndpoint",
+    ].join("\0"),
+    [
+      "authorizationEndpoint",
+      "clientId",
+      "clientSecret",
+      "id",
+      "issuer",
+      "jwksUri",
+      "tokenEndpoint",
+    ].join("\0"),
+  ]);
   // Exactly one Zoho provider, optionally followed by exactly one Google
   // provider for public self-serve signup. Both are pinned to their exact
   // published endpoints -- the bundle chooses WHETHER Google sign-in exists,
@@ -109,13 +125,13 @@ export function buildRuntimeSecret(bundle, identityMode) {
   if (
     providers.length === 2
     && (
-      providerKeys(google).join("\0") !== EXACT_GOOGLE_PROVIDER_KEYS
+      !GOOGLE_PROVIDER_KEY_SHAPES.has(providerKeys(google).join("\0"))
       || google?.id !== "google"
       || google?.issuer !== "https://accounts.google.com"
       || google?.authorizationEndpoint !== "https://accounts.google.com/o/oauth2/v2/auth"
       || google?.tokenEndpoint !== "https://oauth2.googleapis.com/token"
       || google?.jwksUri !== "https://www.googleapis.com/oauth2/v3/certs"
-      || google?.authorizationPrompt !== "select_account"
+      || (google?.authorizationPrompt ?? "select_account") !== "select_account"
       || typeof google?.clientId !== "string"
       || !/^[A-Za-z0-9._-]{4,200}\.apps\.googleusercontent\.com$/u.test(google.clientId)
       || !oneLine(google?.clientSecret)

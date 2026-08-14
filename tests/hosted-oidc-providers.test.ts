@@ -61,7 +61,6 @@ test("each provider is validated independently and a single bad entry fails clos
     { ...google, extra: "nope" }, // unexpected key
     { ...zoho, clientSecret: "short" }, // malformed confidential-client secret
     { ...google, authorizationPrompt: "login" }, // arbitrary prompt injection
-    { ...google, authorizationPrompt: undefined }, // Google must always show its chooser
     { ...entra, authorizationPrompt: "select_account" }, // prompt must not leak to other providers
   ];
   for (const bad of cases) {
@@ -75,4 +74,30 @@ test("duplicate provider ids and oversized lists are refused", () => {
   assert.ok(parseHostedOidcProviders(JSON.stringify([google, { ...entra, id: "google" }])).issues.length >= 1);
   const many = Array.from({ length: 9 }, (_, index) => ({ ...google, id: `p${index}` }));
   assert.ok(parseHostedOidcProviders(JSON.stringify(many)).issues.length >= 1);
+});
+
+test("Google omitting authorizationPrompt is defaulted, not rejected", () => {
+  // Bundles provisioned before the field existed have no authorizationPrompt.
+  // Rejecting them would fail the whole provider list -- taking Zoho down with
+  // Google -- and abort the very EC2 release meant to carry the migration.
+  const { authorizationPrompt: _omitted, ...googleWithoutPrompt } = google;
+  const result = parseHostedOidcProviders(JSON.stringify([zoho, googleWithoutPrompt]));
+  assert.deepEqual(result.issues, []);
+  assert.equal(result.providers.length, 2);
+  // The chooser is still guaranteed: it is applied by default, so an old bundle
+  // and a new one resolve to exactly the same request.
+  assert.equal(result.providers[1]?.authorizationPrompt, "select_account");
+});
+
+test("an explicit non-select_account prompt is still refused for Google", () => {
+  // Defaulting must not become "anything goes": silence means select_account,
+  // but stating a different prompt is still a rejected configuration.
+  const result = parseHostedOidcProviders(
+    JSON.stringify([zoho, { ...google, authorizationPrompt: "login" }]),
+  );
+  // An issue is raised and Google is not among the returned providers. The list
+  // is not empty -- Zoho is still valid -- because this function reports rather
+  // than decides; callers treat any issue as fatal and fail closed.
+  assert.ok(result.issues.length >= 1);
+  assert.equal(result.providers.some((provider) => provider.id === "google"), false);
 });
