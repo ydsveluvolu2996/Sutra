@@ -10,7 +10,7 @@ const dockerfile = readFileSync(
 test("agentless scanner builds versioned Trivy from an immutable patched module closure", () => {
   assert.ok(
     dockerfile.includes(
-      "FROM golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651 AS trivy",
+      "FROM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS trivy",
     ),
   );
   assert.ok(dockerfile.includes("go mod init sutra.local/trivy-release-build"));
@@ -30,6 +30,12 @@ test("agentless scanner builds versioned Trivy from an immutable patched module 
   assert.ok(
     dockerfile.includes(
       "h1:NnAxzGRA0677vCa4BUkOAnO5+FfQqVl9iUXeD0IqcGE=",
+    ),
+  );
+  assert.ok(dockerfile.includes("golang.org/x/net@v0.56.0"));
+  assert.ok(
+    dockerfile.includes(
+      "h1:Rw8j/hFzGvJUZwNBXnAtf5sVDVt+65SK2C7IxCxZt5o=",
     ),
   );
   assert.ok(dockerfile.includes("oras.land/oras-go/v2@v2.6.2"));
