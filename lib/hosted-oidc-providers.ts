@@ -14,7 +14,8 @@
 //       "authorizationEndpoint": "https://accounts.google.com/o/oauth2/v2/auth",
 //       "tokenEndpoint": "https://oauth2.googleapis.com/token",
 //       "jwksUri": "https://www.googleapis.com/oauth2/v3/certs",
-//       "clientId": "1234567890-abc.apps.googleusercontent.com"
+//       "clientId": "1234567890-abc.apps.googleusercontent.com",
+//       "authorizationPrompt": "select_account"
 //     },
 //     {
 //       "id": "entra",
@@ -41,6 +42,8 @@ export interface HostedOidcProviderConfig {
   readonly clientId: string;
   /** Confidential web clients (including Zoho) require this at code exchange. */
   readonly clientSecret?: string;
+  /** The only reviewed provider-scoped authorization prompt. */
+  readonly authorizationPrompt?: "select_account";
 }
 
 export interface HostedOidcProvidersResult {
@@ -53,7 +56,7 @@ const CLIENT_ID = /^[A-Za-z0-9._:-]{3,256}$/u;
 const MAX_PROVIDERS = 8;
 const MAX_RAW_BYTES = 8 * 1024;
 const REQUIRED_KEYS = ["authorizationEndpoint", "clientId", "id", "issuer", "jwksUri", "tokenEndpoint"] as const;
-const OPTIONAL_KEYS = ["clientSecret"] as const;
+const OPTIONAL_KEYS = ["authorizationPrompt", "clientSecret"] as const;
 const REQUIRED_KEY_SIGNATURE = [...REQUIRED_KEYS].sort().join("\0");
 
 function isLoopbackHost(hostname: string): boolean {
@@ -100,14 +103,17 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
   }
   const candidate = entry as Record<string, unknown>;
   const keys = Object.keys(candidate);
-  const requiredSignature = keys.filter((key) => !OPTIONAL_KEYS.includes(key as "clientSecret")).sort().join("\0");
+  const requiredSignature = keys
+    .filter((key) => !OPTIONAL_KEYS.includes(key as (typeof OPTIONAL_KEYS)[number]))
+    .sort()
+    .join("\0");
   if (
     requiredSignature !== REQUIRED_KEY_SIGNATURE ||
-    keys.some((key) => !REQUIRED_KEYS.includes(key as (typeof REQUIRED_KEYS)[number]) && !OPTIONAL_KEYS.includes(key as "clientSecret"))
+    keys.some((key) => !REQUIRED_KEYS.includes(key as (typeof REQUIRED_KEYS)[number]) && !OPTIONAL_KEYS.includes(key as (typeof OPTIONAL_KEYS)[number]))
   ) {
     return {
       config: null,
-      issues: [`${label} must define id, issuer, authorizationEndpoint, tokenEndpoint, jwksUri, and clientId, with only optional clientSecret`],
+      issues: [`${label} must define id, issuer, authorizationEndpoint, tokenEndpoint, jwksUri, and clientId, with only optional clientSecret and authorizationPrompt`],
     };
   }
   const issues: string[] = [];
@@ -140,6 +146,18 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
   ) {
     issues.push(`${label} client secret is invalid`);
   }
+  if (
+    candidate.authorizationPrompt !== undefined &&
+    candidate.authorizationPrompt !== "select_account"
+  ) {
+    issues.push(`${label} authorization prompt must be exactly select_account`);
+  }
+  if (candidate.id === "google" && candidate.authorizationPrompt !== "select_account") {
+    issues.push(`${label} Google configuration must request the select_account chooser`);
+  }
+  if (candidate.id !== "google" && candidate.authorizationPrompt !== undefined) {
+    issues.push(`${label} authorization prompt is supported only for Google`);
+  }
   if (issues.length > 0) return { config: null, issues };
   return {
     config: {
@@ -150,6 +168,9 @@ function providerIssues(entry: unknown, index: number): { readonly config: Hoste
       jwksUri: candidate.jwksUri as string,
       clientId: candidate.clientId as string,
       ...(candidate.clientSecret === undefined ? {} : { clientSecret: candidate.clientSecret as string }),
+      ...(candidate.authorizationPrompt === undefined
+        ? {}
+        : { authorizationPrompt: candidate.authorizationPrompt as "select_account" }),
     },
     issues: [],
   };

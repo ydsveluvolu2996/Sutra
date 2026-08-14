@@ -75,6 +75,16 @@ export function buildRuntimeSecret(bundle, identityMode) {
     "jwksUri",
     "tokenEndpoint",
   ].join("\0");
+  const EXACT_GOOGLE_PROVIDER_KEYS = [
+    "authorizationEndpoint",
+    "authorizationPrompt",
+    "clientId",
+    "clientSecret",
+    "id",
+    "issuer",
+    "jwksUri",
+    "tokenEndpoint",
+  ].join("\0");
   // Exactly one Zoho provider, optionally followed by exactly one Google
   // provider for public self-serve signup. Both are pinned to their exact
   // published endpoints -- the bundle chooses WHETHER Google sign-in exists,
@@ -99,12 +109,13 @@ export function buildRuntimeSecret(bundle, identityMode) {
   if (
     providers.length === 2
     && (
-      providerKeys(google).join("\0") !== EXACT_PROVIDER_KEYS
+      providerKeys(google).join("\0") !== EXACT_GOOGLE_PROVIDER_KEYS
       || google?.id !== "google"
       || google?.issuer !== "https://accounts.google.com"
       || google?.authorizationEndpoint !== "https://accounts.google.com/o/oauth2/v2/auth"
       || google?.tokenEndpoint !== "https://oauth2.googleapis.com/token"
       || google?.jwksUri !== "https://www.googleapis.com/oauth2/v3/certs"
+      || google?.authorizationPrompt !== "select_account"
       || typeof google?.clientId !== "string"
       || !/^[A-Za-z0-9._-]{4,200}\.apps\.googleusercontent\.com$/u.test(google.clientId)
       || !oneLine(google?.clientSecret)

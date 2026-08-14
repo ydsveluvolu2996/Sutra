@@ -13,6 +13,7 @@ const google = {
   tokenEndpoint: "https://oauth2.googleapis.com/token",
   jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
   clientId: "sutra-google.apps.googleusercontent.com",
+  authorizationPrompt: "select_account",
 };
 const entra = {
   id: "entra",
@@ -59,6 +60,9 @@ test("each provider is validated independently and a single bad entry fails clos
     { ...google, id: "Google" }, // non-slug id
     { ...google, extra: "nope" }, // unexpected key
     { ...zoho, clientSecret: "short" }, // malformed confidential-client secret
+    { ...google, authorizationPrompt: "login" }, // arbitrary prompt injection
+    { ...google, authorizationPrompt: undefined }, // Google must always show its chooser
+    { ...entra, authorizationPrompt: "select_account" }, // prompt must not leak to other providers
   ];
   for (const bad of cases) {
     const result = parseHostedOidcProviders(JSON.stringify([bad]));

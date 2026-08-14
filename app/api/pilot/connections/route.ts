@@ -20,6 +20,7 @@ import {
   jsonResponse,
   requirePilotActor,
 } from "../../../../lib/pilot-server";
+import { assertAwsStaticCredentialsOnboardingEnabled } from "../../../../lib/aws-static-credentials-feature";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,9 @@ export async function POST(request: Request): Promise<Response> {
     const actor = await requirePilotActor(request, "customer:create");
     assertSameOrigin(request);
     const body = parseAwsConnectionDraftRequest(await readBoundedJson(request));
+    if (body.connectionMethod === "static_credentials") {
+      assertAwsStaticCredentialsOnboardingEnabled();
+    }
     const createHandoff = (publicTemplateUrl: string | null) => withLocalOnboardingAccountLock(
         body.partition,
         body.awsAccountId,

@@ -51,15 +51,17 @@ test("only AWS offers a Connect control, and no card invents an object count", (
   const live = [...providers.matchAll(/connectHref: "([^"]+)"/gu)].map((match) => match[1]);
   assert.deepEqual(live, ["/onboard"]);
   assert.match(providers, /id: "aws",[\s\S]{0,400}connectHref: "\/onboard"/u);
-  // Every other provider states a reason instead of offering a button.
+  // Future providers remain modelled but are not rendered as integrations
+  // before a collector exists.
   for (const id of ["azure", "gcp", "oracle"]) {
     assert.match(providers, new RegExp(`id: "${id}",[\\s\\S]{0,400}connectHref: null`, "u"));
   }
   assert.equal([...providers.matchAll(/unavailableReason: null/gu)].length, 1);
   // The grid renders a Connect control only on the available branch.
-  assert.match(grid, /available && provider\.connectHref !== null \?/u);
-  assert.match(grid, /Connect \{provider\.name\}/u);
-  assert.match(grid, /connect-provider-blocked">\s*Not yet available/u);
+  assert.match(grid, /CLOUD_PROVIDERS\.filter\(\(provider\) =>\s*\n\s*provider\.connectHref !== null/u);
+  assert.match(grid, /Search clouds and integrations/u);
+  assert.match(grid, /<span aria-hidden="true">\+<\/span> ADD/u);
+  assert.doesNotMatch(grid, /Not yet available/u);
   // No borrowed object counts, and no borrowed customer logos either.
   assert.doesNotMatch(providers, /supports over \d/u);
   assert.doesNotMatch(grid, /supports over \d/u);

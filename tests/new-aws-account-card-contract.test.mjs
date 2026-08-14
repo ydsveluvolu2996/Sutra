@@ -8,7 +8,7 @@ const source = await readFile(resolve(root, "app/onboard/onboard-account.tsx"), 
 
 /**
  * The connection form is shaped after a reference onboarding card: one titled
- * card carrying Account Name, an "Authenticate using" tab pair, External ID,
+ * card carrying Account Name, an authentication-card pair, External ID,
  * Role ARN with template links, and Partition, closed by "Select another cloud
  * provider" and "Continue".
  *
@@ -23,23 +23,24 @@ test("the form is one card with the reference fields in the reference order", ()
   assert.match(source, /<h2 className="aws-account-card-title">New AWS Account<\/h2>/u);
   const start = source.indexOf('className="onboard-form aws-account-card"');
   const card = source.slice(start, source.indexOf("</form>", start));
-  const order = ["Account Name", "AWS account ID", "Authenticate using", "External ID", "Role ARN (CloudFormation stack output parameter)", "Partition", "Advanced options"];
+  const order = ["Account Name", "AWS account ID", "Authentication Type", "External ID", "Role ARN (CloudFormation stack output parameter)", "Partition", "Advanced options"];
   let cursor = 0;
   for (const field of order) {
     const at = card.indexOf(field, cursor);
     assert.ok(at > -1, `${field} must appear in the card, after ${order[order.indexOf(field) - 1] ?? "the start"}`);
     cursor = at;
   }
-  // Both authentication tabs are still offered.
-  assert.match(card, /IAM Role/u);
-  assert.match(card, /Access & Secret Keys/u);
+  // Both authentication choices are visible, but static keys fail closed until
+  // their Secrets Manager storage boundary is deployed.
+  assert.match(card, /IAM Role <em>Recommended<\/em>/u);
+  assert.match(card, /Access &amp; Secret Keys/u);
+  assert.match(card, /disabled=\{!staticCredentialsEnabled\}/u);
 });
 
-test("the card closes with the reference actions and no other primary control", () => {
-  assert.match(source, /className="aws-account-card-actions"[\s\S]{0,300}Select another cloud provider/u);
-  assert.match(source, /Select another cloud provider<\/a>[\s\S]{0,900}: "Continue"\}<\/button>/u);
-  // "Select another cloud provider" goes back to the hub, not to a dead anchor.
-  assert.match(source, /href="\/welcome#connect">Select another cloud provider/u);
+test("the card closes with Go back and Continue actions", () => {
+  assert.match(source, /className="aws-account-card-actions"[\s\S]{0,300}Go back/u);
+  assert.match(source, /Go back<\/a>[\s\S]{0,900}: "Continue"\}<\/button>/u);
+  assert.match(source, /href="\/welcome#connect">Go back/u);
 });
 
 test("the External ID is server-minted, never an input and never reshuffled", () => {
@@ -78,10 +79,11 @@ test("the depth the reference has no room for is collapsed, not deleted", () => 
   assert.match(advanced, /Region coverage/u);
 });
 
-test("a finished connection stops being a wizard", () => {
-  // Setup completion is derived from the trust actually being live, not from
-  // clicking through the steps.
-  assert.match(source, /const connectionSetupComplete = liveConnection !== null\s*\n\s*&& \(liveConnection\.status === "active" \|\| liveConnection\.status === "disabled"\)/u);
+test("a finished connection stops being a wizard only after discovery", () => {
+  // Valid trust is not completed inventory. The wizard closes only after a
+  // complete projection (or a terminal disabled state), never merely on active.
+  assert.match(source, /const discoveryComplete = collectionHealth\?\.kind === "complete"/u);
+  assert.match(source, /liveConnection\.status === "active" && discoveryComplete/u);
   // The step rail is wayfinding for work in progress, so it goes away.
   assert.match(source, /connectionSetupComplete \? null : <WizardStepRail/u);
   // What replaces it is a plain statement of fact plus the next real action --
@@ -89,6 +91,27 @@ test("a finished connection stops being a wizard", () => {
   assert.match(source, /className="onboard-connected" role="status"/u);
   assert.match(source, /is connected to AWS<\/h2>/u);
   assert.match(source, /<ConnectProviderGrid heading="Connect another cloud account"/u);
+});
+
+test("role setup exposes quick launch, manual creation, validation, and discovery progress", () => {
+  assert.match(source, /role="tablist"/u);
+  assert.match(source, />Quick launch<\/button>/u);
+  assert.match(source, />Manual creation<\/button>/u);
+  assert.match(source, /Download least-privilege CloudFormation/u);
+  assert.match(source, /externalIdCopyStatus === "copied" \? "Copied"/u);
+  assert.match(source, /"Checking connection…"/u);
+  assert.match(source, /Connection saved; discovery queued/u);
+  assert.match(source, /Inventory arrives asynchronously/u);
+  assert.match(source, /Retry discovery/u);
+  assert.match(source, /Return to dashboard/u);
+});
+
+test("required account fields validate inline without losing non-secret input", () => {
+  assert.match(source, /noValidate onSubmit=\{createConnection\}/u);
+  assert.match(source, /Account name must be specified\./u);
+  assert.match(source, /A 12-digit AWS account ID must be specified\./u);
+  assert.match(source, /aria-describedby=\{formValidationVisible/u);
+  assert.match(source, /setFormValidationVisible\(true\)/u);
 });
 
 test("the deployment and lifecycle surface is collapsed, never deleted", () => {
@@ -100,7 +123,7 @@ test("the deployment and lifecycle surface is collapsed, never deleted", () => {
   assert.match(source, /Connection details and trust lifecycle/u);
   // The things an operator still needs after setup remain reachable inside it.
   for (const kept of [
-    "Exact collector principal",
+    "Trusted account (Sutra collector principal)",
     "Control or remove collector access",
     "Offboard AWS trust",
     "ExternalId handoff is closed",

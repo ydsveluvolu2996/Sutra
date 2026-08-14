@@ -17,6 +17,7 @@ import {
   verifyCollectorConnection,
 } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
+import { assertAwsStaticCredentialsOnboardingEnabled } from "../../../../../lib/aws-static-credentials-feature";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,9 @@ export async function POST(request: Request): Promise<Response> {
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecretForOrg(actor.orgId, connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
+    if (stored.sourceKind === "aws_static_credentials") {
+      assertAwsStaticCredentialsOnboardingEnabled();
+    }
     const health = await getCollectorHealth(stored.partition);
     if (health.mode !== "live") {
       throw Object.assign(new Error("AWS trust validation requires an explicitly enabled live collector"), { code: "INVALID_STATE" });

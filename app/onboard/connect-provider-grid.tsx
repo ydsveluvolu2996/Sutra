@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { CLOUD_PROVIDERS, type CloudProviderId } from "../../lib/onboarding-providers";
 
 /**
@@ -61,41 +61,57 @@ export function ConnectProviderGrid({
   /** Highlights the provider already being configured, if any. */
   readonly selectedId?: CloudProviderId;
 }) {
+  const [query, setQuery] = useState("");
+  const availableProviders = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase("en-US");
+    return CLOUD_PROVIDERS.filter((provider) =>
+      provider.connectHref !== null &&
+      (normalized.length === 0 ||
+        provider.name.toLocaleLowerCase("en-US").includes(normalized) ||
+        provider.shortName.toLocaleLowerCase("en-US").includes(normalized)),
+    );
+  }, [query]);
   return (
     <section aria-labelledby="connect-providers-title" className="connect-hub">
+      <p className="eyebrow">Clouds &amp; Integrations</p>
       <h2 className="connect-hub-title" id="connect-providers-title">{heading}</h2>
       {intro === undefined ? null : <p className="connect-hub-intro">{intro}</p>}
+      <label className="connect-provider-search">
+        <span className="sr-only">Search clouds and integrations</span>
+        <input
+          aria-label="Search clouds and integrations"
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search integrations"
+          type="search"
+          value={query}
+        />
+      </label>
       <div className="connect-provider-grid">
-        {CLOUD_PROVIDERS.map((provider) => {
-          const available = provider.connectHref !== null;
+        {availableProviders.map((provider) => {
           return (
             <article
               className="connect-provider-card"
-              data-available={available ? "true" : "false"}
+              data-available="true"
               data-selected={provider.id === selectedId ? "true" : undefined}
               key={provider.id}
             >
               <span className="connect-provider-mark">{PROVIDER_MARKS[provider.id]}</span>
               <strong className="connect-provider-name">{provider.shortName}</strong>
               <p className="connect-provider-capability">{provider.capability}</p>
-              {available && provider.connectHref !== null ? (
+              {provider.connectHref !== null ? (
                 <Link className="button button-primary connect-provider-action" href={provider.connectHref}>
-                  Connect {provider.name}
+                  <span aria-hidden="true">+</span> ADD
                 </Link>
-              ) : (
-                <>
-                  <span aria-disabled="true" className="connect-provider-action connect-provider-blocked">
-                    Not yet available
-                  </span>
-                  <small className="connect-provider-reason">{provider.unavailableReason}</small>
-                </>
-              )}
+              ) : null}
             </article>
           );
         })}
       </div>
+      {availableProviders.length === 0 ? (
+        <p className="connect-provider-empty" role="status">No available integrations match that search.</p>
+      ) : null}
       <p className="connect-hub-note">
-        Read-only permissions required · Guided setup · No credit card needed.
+        AWS is the only production connector currently available. The catalog can add more providers when their collectors ship.
       </p>
     </section>
   );

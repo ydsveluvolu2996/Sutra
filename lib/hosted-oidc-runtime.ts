@@ -66,6 +66,9 @@ function toClientConfiguration(provider: HostedOidcProviderConfig, origin: strin
     tokenEndpoint: provider.tokenEndpoint,
     clientId: provider.clientId,
     ...(provider.clientSecret === undefined ? {} : { clientSecret: provider.clientSecret }),
+    ...(provider.authorizationPrompt === undefined
+      ? {}
+      : { authorizationPrompt: provider.authorizationPrompt }),
     redirectUri: `${origin}/api/auth/oidc/callback`,
     jwksUrl: provider.jwksUri,
   };

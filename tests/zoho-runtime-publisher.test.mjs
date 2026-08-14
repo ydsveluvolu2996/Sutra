@@ -69,6 +69,7 @@ const GOOGLE_PROVIDER = {
   jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
   clientId: "1234567890-example.apps.googleusercontent.com",
   clientSecret: "google-client-secret",
+  authorizationPrompt: "select_account",
 };
 
 function withProviders(...providers) {
@@ -89,6 +90,7 @@ test("publisher refuses any Google entry off the exact pinned contract", () => {
     { ...GOOGLE_PROVIDER, jwksUri: "https://attacker.example/certs" },
     { ...GOOGLE_PROVIDER, clientId: "not-a-google-client-id" },
     { ...GOOGLE_PROVIDER, clientSecret: "short" },
+    { ...GOOGLE_PROVIDER, authorizationPrompt: "login" },
     { ...GOOGLE_PROVIDER, unexpectedEndpoint: "https://attacker.example" },
   ]) {
     assert.throws(

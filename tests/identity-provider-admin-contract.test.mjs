@@ -30,6 +30,7 @@ const PROVIDERS = JSON.stringify([
     tokenEndpoint: "https://oauth2.googleapis.com/token",
     jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
     clientId: "sutra-google.apps.googleusercontent.com",
+    authorizationPrompt: "select_account",
   },
   {
     id: "entra",
@@ -68,7 +69,7 @@ test("provider descriptors resolve only to exact server-configured issuers", () 
   configureHostedOidc();
   const request = new Request(`${ORIGIN}/api/v1/invitations`);
   assert.deepEqual(hostedIdentityProviderSummaries(request), [
-    { kind: "oidc", id: "google", label: "Google Workspace" },
+    { kind: "oidc", id: "google", label: "Google" },
     { kind: "oidc", id: "entra", label: "Microsoft Entra ID" },
   ]);
   assert.equal(

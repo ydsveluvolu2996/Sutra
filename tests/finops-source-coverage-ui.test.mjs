@@ -356,7 +356,7 @@ test("the source contract lives in FinOps and the onboarding page carries only o
   // also displayed the whole 29-dashboard catalog -- and "Connection health",
   // which links into that page by anchor, inherited it too.
   const onboard = await readFile(`${root}app/onboard/page.tsx`, "utf8");
-  assert.match(onboard, /<OnboardAccount \/>/u);
+  assert.match(onboard, /<OnboardAccount staticCredentialsEnabled=\{isAwsStaticCredentialsOnboardingEnabled\(\)\} \/>/u);
   assert.doesNotMatch(onboard, /FinopsSourceCoverage|FinopsOnboardingSources/u);
 
   const finops = await readFile(`${root}app/costs/sources/page.tsx`, "utf8");

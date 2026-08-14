@@ -41,8 +41,8 @@ interface FederationStatus {
 const SHOWCASE = [
   {
     tone: "graph",
-    title: "Security graph, backed by evidence",
-    copy: "Explore every cloud, Kubernetes, identity and network relationship on one canvas — and every edge is a cited observation, not a guess.",
+    title: "Discover your cloud estate automatically.",
+    copy: "Build a current, evidence-backed inventory without agents or spreadsheets.",
     glyph: (
       <>
         <circle cx="14" cy="34" r="6" /><circle cx="40" cy="18" r="6" /><circle cx="40" cy="50" r="6" /><circle cx="66" cy="34" r="6" />
@@ -52,8 +52,8 @@ const SHOWCASE = [
   },
   {
     tone: "issues",
-    title: "The risks that actually matter",
-    copy: "Not thousands of CVEs — the handful that are internet-reachable, running, and exploitable, proven with observed network and runtime evidence.",
+    title: "Manage and explore AWS assets from one CMDB.",
+    copy: "Follow resources, relationships, changes, cost, and security posture in one place.",
     glyph: (
       <>
         <path d="M40 12 66 56H14z" /><path d="M40 30v14M40 50h.02" />
@@ -62,58 +62,24 @@ const SHOWCASE = [
   },
   {
     tone: "ciem",
-    title: "What every identity can reach",
-    copy: "Resolve a workload's effective permissions and follow its IRSA role into AWS — can this pod read Secrets, or delete a bucket?",
+    title: "Onboard clients with least-privilege access.",
+    copy: "Use customer-owned read-only roles, unique External IDs, and auditable validation.",
     glyph: (
       <>
         <circle cx="26" cy="42" r="12" /><path d="m34 34 26-26" /><path d="m50 8 8 8M56 4 66 14" />
       </>
     ),
   },
-  {
-    tone: "trends",
-    title: "A score you can resell",
-    copy: "Track each customer's security posture over time, catch regressions the moment they land, and export the report an MSP hands over.",
-    glyph: (
-      <>
-        <path d="M12 52 30 34l12 10L68 16" /><path d="M52 16h16v16" />
-      </>
-    ),
-  },
-  {
-    tone: "drift",
-    title: "Drift and new CVEs, the moment they appear",
-    copy: "See a workload that drifted from its admitted spec, or an image that gained a vulnerability since the last scan — then generate the fix.",
-    glyph: (
-      <>
-        <path d="M40 12v20M30 22h20" /><path d="M18 42h44" /><path d="M26 52h28" />
-      </>
-    ),
-  },
 ] as const;
 
 function LoginShowcase() {
-  const [index, setIndex] = useState(0);
-  // A timeout keyed on the current slide, rather than a fixed interval, means a
-  // manual selection also restarts the dwell time instead of being replaced a
-  // moment later. Reduced motion keeps the slide fixed until it is chosen.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const timer = window.setTimeout(
-      () => setIndex((current) => (current + 1) % SHOWCASE.length),
-      4600,
-    );
-    return () => window.clearTimeout(timer);
-  }, [index]);
   return (
-    <div className="login-showcase" role="group" aria-roledescription="carousel" aria-label="Sutra capabilities">
+    <div className="login-showcase" aria-label="Why teams use Sutra">
       <div className="login-showcase-stage">
-        {SHOWCASE.map((feature, position) => (
+        {SHOWCASE.map((feature) => (
           <article
             key={feature.tone}
-            className={`login-feature login-feature-${feature.tone}${position === index ? " is-active" : ""}`}
-            aria-hidden={position !== index}
+            className={`login-feature login-feature-${feature.tone}`}
           >
             <span className="login-feature-icon">
               <svg viewBox="0 0 80 68" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -125,19 +91,19 @@ function LoginShowcase() {
           </article>
         ))}
       </div>
-      <div className="login-showcase-dots" role="group" aria-label="Choose a capability to show">
-        {SHOWCASE.map((feature, position) => (
-          <button
-            key={feature.tone}
-            type="button"
-            aria-current={position === index}
-            aria-label={`Show capability ${position + 1} of ${SHOWCASE.length}: ${feature.title}`}
-            className={position === index ? "is-active" : undefined}
-            onClick={() => setIndex(position)}
-          />
-        ))}
-      </div>
     </div>
+  );
+}
+
+function FederationMark({ provider }: { readonly provider: FederationProvider }) {
+  if (provider.kind !== "oidc" || provider.id !== "google") return null;
+  return (
+    <svg aria-hidden="true" className="auth-provider-mark" viewBox="0 0 24 24">
+      <path fill="#4285F4" d="M21.6 12.2c0-.7-.1-1.4-.2-2H12v3.9h5.4a4.6 4.6 0 0 1-2 3v2.5h3.2c1.9-1.7 3-4.3 3-7.4Z" />
+      <path fill="#34A853" d="M12 22c2.7 0 5-.9 6.6-2.4l-3.2-2.5c-.9.6-2 1-3.4 1a5.8 5.8 0 0 1-5.4-4H3.3v2.6A10 10 0 0 0 12 22Z" />
+      <path fill="#FBBC05" d="M6.6 14.1a6 6 0 0 1 0-4.2V7.3H3.3a10 10 0 0 0 0 9.4l3.3-2.6Z" />
+      <path fill="#EA4335" d="M12 5.9c1.5 0 2.9.5 4 1.5l3-3A10 10 0 0 0 3.3 7.3l3.3 2.6a5.8 5.8 0 0 1 5.4-4Z" />
+    </svg>
   );
 }
 
@@ -331,14 +297,14 @@ export default function LoginPage() {
               <div className="auth-heading">
                 {federation !== null && !federation.invitationOnly ? (
                   <>
-                    <span>Get started</span>
-                    <h2>Sign in or create your workspace</h2>
+                    <span>Welcome to Sutra</span>
+                    <h2>Sign in</h2>
                     <p>Continue with your identity provider. First time here? Signing in creates your own Sutra workspace on a free trial — no credit card, read-only cloud permissions.</p>
                   </>
                 ) : (
                   <>
                     <span>Enterprise identity</span>
-                    <h2>Sign in to Sutra</h2>
+                    <h2>Sign in</h2>
                     <p>Continue through an identity provider configured by your organization. Sutra accepts only verified, pre-provisioned memberships.</p>
                   </>
                 )}
@@ -349,6 +315,7 @@ export default function LoginPage() {
                   href={federationHref(provider)}
                   key={`${provider.kind}:${provider.id}`}
                 >
+                  <FederationMark provider={provider} />
                   Continue with {provider.label}
                 </a>
               ))}

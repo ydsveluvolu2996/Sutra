@@ -29,6 +29,7 @@ const PROVIDERS = JSON.stringify([
     tokenEndpoint: "https://oauth2.googleapis.com/token",
     jwksUri: "https://www.googleapis.com/oauth2/v3/certs",
     clientId: "sutra-google.apps.googleusercontent.com",
+    authorizationPrompt: "select_account",
   },
 ]);
 
