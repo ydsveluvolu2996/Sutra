@@ -19,6 +19,7 @@
  */
 
 import type { RunnableJob } from "./background-job-runner.ts";
+import { assertAwsStaticCredentialsOnboardingEnabled } from "./aws-static-credentials-feature.ts";
 import { isLiveAwsSourceKind } from "./pilot-types.ts";
 import type { PilotConnection, PilotSnapshotPayload, SnapshotOrigin, SyncStatus } from "./pilot-types.ts";
 
@@ -214,6 +215,9 @@ export async function runHostedCollectorJob(
     connection.permissionPackVersion !== CURRENT_PERMISSION_PACK
   ) {
     throw new HostedCollectorJobError("hosted-collector-connection-not-runnable");
+  }
+  if (connection.sourceKind === "aws_static_credentials") {
+    assertAwsStaticCredentialsOnboardingEnabled();
   }
 
   const idempotencyBase = await operationIdempotencyBase({

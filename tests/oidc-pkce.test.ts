@@ -32,6 +32,24 @@ test("authorization request binds code flow, PKCE, nonce, state, and safe return
   assert.equal(url.toString().includes(created.transaction.codeVerifier), false);
 });
 
+test("authorization prompt is provider-scoped and limited to the reviewed account chooser", async () => {
+  const google = await createOidcAuthorization(
+    { ...configuration, authorizationPrompt: "select_account" },
+    "google",
+    "/dashboard",
+    1_100_000,
+  );
+  assert.equal(new URL(google.url).searchParams.get("prompt"), "select_account");
+  const otherProvider = await createOidcAuthorization(configuration, "entra", "/dashboard", 1_100_001);
+  assert.equal(new URL(otherProvider.url).searchParams.has("prompt"), false);
+  await assert.rejects(createOidcAuthorization(
+    { ...configuration, authorizationPrompt: "login" as "select_account" },
+    "google",
+    "/dashboard",
+    1_100_002,
+  ));
+});
+
 test("encrypted transaction round-trips and rejects tampering, wrong keys, and expiry", async () => {
   const { transaction } = await createOidcAuthorization(configuration, "google", "/dashboard", 2_000_000);
   const sealed = await sealOidcTransaction(transaction, key);

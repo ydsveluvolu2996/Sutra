@@ -28,6 +28,9 @@ if ! git diff --cached --quiet; then
 fi
 
 git fetch origin develop
+# `main` is fetched too, so the standing-pull-request step below can tell
+# "nothing to open one against yet" apart from a real API failure.
+git fetch origin main
 
 save_recovery_checkpoint() {
   local checkpoint_stamp checkpoint_sha recovery_branch
@@ -154,6 +157,23 @@ pull_requests="$(github_api GET \
   "repos/${repository_name}/pulls?state=open&base=main&head=ydsveluvolu2996:develop&per_page=100")"
 pull_request_count="$(jq -r 'length' <<< "${pull_requests}")"
 [[ "${pull_request_count}" =~ ^[0-9]+$ ]]
+
+# Right after a promotion, develop and main are identical. GitHub refuses to
+# open a pull request with no commit difference, so attempting one here fails
+# with a bare 422 that reads like a broken script. There is genuinely nothing to
+# open yet, and nothing unverified either -- the branch holds no work. The
+# standing pull request is created by the next run, which pushes a real commit
+# before reaching this point, so the first change of a cycle is never the thing
+# that lands without a gate.
+commits_ahead_of_main="$(git rev-list --count origin/main..HEAD)"
+[[ "${commits_ahead_of_main}" =~ ^[0-9]+$ ]]
+
+if [[ "${pull_request_count}" == "0" && "${commits_ahead_of_main}" == "0" ]]; then
+  echo "Checkpoint saved to GitHub at $(git rev-parse --short=12 HEAD)."
+  echo "develop matches main, so there is no standing pull request to open yet." >&2
+  echo "It is opened automatically with the first change of this cycle." >&2
+  exit 0
+fi
 
 if [[ "${pull_request_count}" == "0" ]]; then
   payload_file="$(mktemp)"

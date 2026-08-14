@@ -10,8 +10,9 @@ overrides:
   postcss: 8.5.23
   # GHSA-2v37-7h3g-55p8: a custom nanoid generator loops indefinitely when the
   # requested size is zero. Transitive via next > postcss > nanoid, which
-  # resolves 3.3.16 under the postcss pin above. Patched in 3.3.17.
-  nanoid: 3.3.17
+  # resolves 3.3.16 under the postcss pin above. The advisory was re-scoped to
+  # include 3.3.17, so the fixed floor is now 3.3.18.
+  nanoid: 3.3.18
   # CVE-2026-13697 plus five related advisories: undici cache, cookie and CRLF
   # issues. Transitive via miniflare and wrangler. Patched in 7.29.0.
   undici: 7.29.0

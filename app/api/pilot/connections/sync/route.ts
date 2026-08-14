@@ -17,6 +17,7 @@ import {
   safeCollectionFailureCode,
 } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
+import { assertAwsStaticCredentialsOnboardingEnabled } from "../../../../../lib/aws-static-credentials-feature";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +46,9 @@ export async function POST(request: Request): Promise<Response> {
     connectionId = connectionIdFrom(await readBoundedJson(request));
     const stored = await getStoredConnectionSecretForOrg(actor.orgId, connectionId);
     assertSessionCapability(actor.authenticated, "sync:run", stored.customerId);
+    if (stored.sourceKind === "aws_static_credentials") {
+      assertAwsStaticCredentialsOnboardingEnabled();
+    }
     if (stored.permissionPackVersion !== CURRENT_PILOT_PERMISSION_PACK) {
       throw Object.assign(new Error("Revalidate the current AWS permission pack before running inventory"), { code: "INVALID_STATE" });
     }

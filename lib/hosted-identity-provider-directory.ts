@@ -32,7 +32,7 @@ const PROVIDER_ID = /^[a-z][a-z0-9_-]{1,31}$/u;
 function oidcLabel(id: string): string {
   if (id === "zoho") return "Zoho SSO";
   if (id === "entra") return "Microsoft Entra ID";
-  if (id === "google") return "Google Workspace";
+  if (id === "google") return "Google";
   return `${id.slice(0, 1).toLocaleUpperCase("en-US")}${id.slice(1)} OIDC`;
 }
 

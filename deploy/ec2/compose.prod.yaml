@@ -108,6 +108,8 @@ services:
       # The deployment boundary selects only the switch matching identity mode;
       # neither switch can enable the other adapter.
       SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true"
+      # Fail closed: the reviewed Secrets Manager reference-only backend is not deployed.
+      SUTRA_AWS_STATIC_KEYS_ENABLED: "false"
       # Self-serve signup: a verified Google identity with no membership creates
       # its own trial organization. Off unless explicitly enabled in .env.ec2 --
       # the value comes only from that managed file, never from ambient host

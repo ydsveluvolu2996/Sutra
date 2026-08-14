@@ -10,6 +10,8 @@ export interface OidcClientConfiguration {
   readonly clientId: string;
   readonly clientSecret?: string;
   readonly redirectUri: string;
+  /** Provider-scoped, allowlisted authorization behavior. */
+  readonly authorizationPrompt?: "select_account";
 }
 
 export interface OidcAuthorizationTransaction {
@@ -85,6 +87,12 @@ export function validateOidcClientConfiguration(configuration: OidcClientConfigu
   ) {
     throw new Error("OIDC client secret is invalid");
   }
+  if (
+    configuration.authorizationPrompt !== undefined &&
+    configuration.authorizationPrompt !== "select_account"
+  ) {
+    throw new Error("OIDC authorization prompt is invalid");
+  }
 }
 
 export function safeOidcReturnTo(value: string | null | undefined): string {
@@ -130,6 +138,9 @@ export async function createOidcAuthorization(
     nonce: transaction.nonce,
     code_challenge: await codeChallenge(transaction.codeVerifier),
     code_challenge_method: "S256",
+    ...(configuration.authorizationPrompt === undefined
+      ? {}
+      : { prompt: configuration.authorizationPrompt }),
   }).toString();
   return { url: url.toString(), transaction };
 }

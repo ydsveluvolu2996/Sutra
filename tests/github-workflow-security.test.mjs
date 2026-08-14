@@ -600,6 +600,17 @@ test("daily development helpers preserve work and the standing integration PR", 
   // Exactly one standing pull request, still enforced.
   assert.match(save, /Expected exactly one develop → main pull request/u);
 
+  // Straight after a promotion the branches match and GitHub refuses to open a
+  // pull request at all. That is not a failure and must not be reported as one:
+  // there is no work on the branch to leave unverified, and the next run pushes
+  // a real commit before reaching the create step.
+  assert.match(save, /git fetch origin main/u);
+  assert.match(save, /commits_ahead_of_main="\$\(git rev-list --count origin\/main\.\.HEAD\)"/u);
+  assert.match(save, /pull_request_count\}" == "0" && "\$\{commits_ahead_of_main\}" == "0"/u);
+  assert.match(save, /no standing pull request to open yet/u);
+  // It exits successfully in that case rather than dying on a bare 422.
+  assert.match(save, /no standing pull request to open yet[\s\S]{0,300}exit 0/u);
+
   // A missing GitHub CLI must not silently cost develop its CI coverage: the
   // script falls back to the REST API, and reports the real consequence when
   // neither transport is available rather than dying on `gh auth status`.

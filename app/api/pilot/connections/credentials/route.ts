@@ -22,6 +22,7 @@ import { withLocalOnboardingAccountLock } from "../../../../../lib/local-onboard
 import { stageVerifyThenCommitRole } from "../../../../../lib/local-aws-lifecycle";
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
 import { enqueueTenantCollectionJob } from "../../../../../lib/hosted-collector-job";
+import { assertAwsStaticCredentialsOnboardingEnabled } from "../../../../../lib/aws-static-credentials-feature";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,7 @@ async function onboardingCollectionOperationId(connectionId: string, accessKeyLa
 
 export async function POST(request: Request): Promise<Response> {
   try {
+    assertAwsStaticCredentialsOnboardingEnabled();
     const actor = await requirePilotActor(request, "workspace:read");
     assertSameOrigin(request);
     // The submitted credentials exist only in this request-scoped binding.

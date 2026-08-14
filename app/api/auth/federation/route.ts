@@ -15,7 +15,7 @@ interface FederationEnvironment {
 function oidcLabel(id: string): string {
   if (id === "zoho") return "Zoho SSO";
   if (id === "entra") return "Microsoft Entra ID";
-  if (id === "google") return "Google Workspace";
+  if (id === "google") return "Google";
   return `${id.slice(0, 1).toLocaleUpperCase("en-US")}${id.slice(1)} OIDC`;
 }
 
@@ -45,7 +45,11 @@ export async function GET(request: Request): Promise<Response> {
         label: provider.label,
         startUrl: `/api/auth/saml/start?provider=${encodeURIComponent(provider.id)}`,
       })),
-    ];
+    ].sort((left, right) => {
+      if (left.id === "google") return -1;
+      if (right.id === "google") return 1;
+      return 0;
+    });
     if (providers.length === 0) throw new Error("No federation providers are configured");
     return Response.json({
       identityMode: mode,

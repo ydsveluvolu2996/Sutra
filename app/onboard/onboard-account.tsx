@@ -121,6 +121,17 @@ interface RegisterCredentialsResponse {
   readonly collection: { readonly jobId: string; readonly status: "queued" };
 }
 
+interface RegisterRoleResponse {
+  readonly connection: PilotConnection;
+  readonly registered: true;
+  readonly verification: {
+    readonly accountId: string;
+    readonly roleArn: string;
+    readonly callerIdentityArn: string;
+  };
+  readonly collection: { readonly jobId: string; readonly status: "queued" };
+}
+
 // AWS long-lived (AKIA) and temporary (ASIA) access key IDs share this shape.
 const AWS_ACCESS_KEY_ID_PATTERN = /^(AKIA|ASIA)[A-Z0-9]{16}$/u;
 const AWS_SECRET_ACCESS_KEY_LENGTH = 40;
@@ -303,7 +314,11 @@ function ConnectionWorkArea({
   );
 }
 
-export function OnboardAccount() {
+export function OnboardAccount({
+  staticCredentialsEnabled,
+}: {
+  readonly staticCredentialsEnabled: boolean;
+}) {
   const { state, health, loading, refresh } = usePilotState();
   const { session } = useSession();
   const capabilities = new Set(session?.capabilities ?? []);
@@ -329,6 +344,9 @@ export function OnboardAccount() {
   const [rolePath, setRolePath] = useState(SUTRA_ROLE_NAMESPACE);
   const [roleName, setRoleName] = useState(SUTRA_TEMPLATE_ROLE_NAME);
   const [roleArn, setRoleArn] = useState("");
+  const [roleSetupTab, setRoleSetupTab] = useState<"quick" | "manual">("quick");
+  const [externalIdCopyStatus, setExternalIdCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
+  const [formValidationVisible, setFormValidationVisible] = useState(false);
   const [created, setCreated] = useState<CreateConnectionResponse | null>(null);
   const [oneTimeExternalId, setOneTimeExternalId] = useState<string | null>(null);
   const [handoffDrafts, setHandoffDrafts] = useState<PendingHandoffDraft[]>(() =>
@@ -365,6 +383,7 @@ export function OnboardAccount() {
   // body and validation rule keeps reading exactly what it read before.
   function selectOnboardPath(next: OnboardPath): void {
     if (next === "static_credentials") {
+      if (!staticCredentialsEnabled) return;
       setConnectionMethod("static_credentials");
       return;
     }
@@ -395,14 +414,18 @@ export function OnboardAccount() {
     : connection?.roleArn || credentialsRegistered ? 3 : liveConnection ? 2 : 1;
   const enteringAccessKeys = Boolean(credentialConnection)
     || (!liveConnection && connectionMethod === "static_credentials");
-  // Onboarding is finished for this connection once the trust is live. Past that
-  // point the page is no longer a wizard, and presenting one -- a step rail
-  // stalled at "Step 2 of 4", a deployment checklist for a stack that already
-  // exists, a closed-handoff notice -- describes work nobody has left to do. The
-  // operational surface still exists below, one disclosure away, because
-  // revalidating and offboarding remain real; it just stops being the page.
+  const collectionHealth = state && liveConnection ? describeLatestCollection(state) : null;
+  const discoveryComplete = collectionHealth?.kind === "complete";
+  const discoveryCanRetry = collectionHealth?.kind === "failed"
+    || collectionHealth?.kind === "partial"
+    || collectionHealth?.kind === "unknown";
+  // Valid credentials are not inventory. Keep the fourth step visible while the
+  // durable discovery job is queued/running (or needs a retry), and collapse the
+  // wizard only after a complete CMDB projection exists. A disabled connection
+  // is terminal too, but is never presented as healthy.
   const connectionSetupComplete = liveConnection !== null
-    && (liveConnection.status === "active" || liveConnection.status === "disabled");
+    && (liveConnection.status === "disabled" ||
+      (liveConnection.status === "active" && discoveryComplete));
   // The rail states what each step actually proves, so an operator can see why
   // a step exists before reaching it. Step 2's contract differs by grant path:
   // a role is deployed in the customer account, access keys are handed over.
@@ -417,7 +440,6 @@ export function OnboardAccount() {
   const trustHealth = connection
     ? describeTrustHealth(connection)
     : credentialConnection ? describeStaticCredentialHealth(credentialConnection) : null;
-  const collectionHealth = state && liveConnection ? describeLatestCollection(state) : null;
   const connectionOffboarded = connection?.status === "disabled" && connection.roleArn === null;
   const connectionDisabled = connection?.status === "disabled" && connection.roleArn !== null;
   const collectorMode = created?.collector.mode ?? health?.mode;
@@ -493,15 +515,25 @@ export function OnboardAccount() {
 
   async function createConnection(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setBusy("create");
-    setError(null);
-    setNotice(null);
+    setFormValidationVisible(true);
     const normalizedName = customerName.trim().replace(/\s+/gu, " ");
     const enabledRegions = regionSelectionMode === ALL_ENABLED_AWS_REGIONS
       ? [ALL_ENABLED_AWS_REGIONS]
       : [...new Set(
           regions.split(",").map((region) => region.trim()).filter(Boolean),
         )].sort();
+    if (
+      normalizedName.length < 2 ||
+      !/^\d{12}$/u.test(accountId) ||
+      (regionSelectionMode === "explicit" && enabledRegions.length === 0) ||
+      customerManagedRoleError !== null
+    ) {
+      setError("Complete the required account details before continuing.");
+      return;
+    }
+    setBusy("create");
+    setError(null);
+    setNotice(null);
     if (connectionMethod === "static_credentials") {
       // The access-key method has no ExternalId handoff to strand, so this
       // branch stores no browser draft and displays no trust value. The keys
@@ -575,6 +607,17 @@ export function OnboardAccount() {
     }
   }
 
+  async function copyExternalId(): Promise<void> {
+    if (!oneTimeExternalId) return;
+    try {
+      await navigator.clipboard.writeText(oneTimeExternalId);
+      setExternalIdCopyStatus("copied");
+    } catch {
+      setExternalIdCopyStatus("failed");
+    }
+    window.setTimeout(() => setExternalIdCopyStatus("idle"), 2400);
+  }
+
   async function recoverConnectionHandoff() {
     if (!recoverableDraft || connection?.roleArn || connection?.status !== "pending") return;
     setBusy("create");
@@ -640,7 +683,7 @@ export function OnboardAccount() {
       // keeps the same actor-bound handoff recoverable if AWS proof or the
       // atomic database commit fails.
       setOneTimeExternalId(null);
-      const response = await postPilot<{ connection: PilotConnection }>("/api/pilot/connections/role", {
+      const response = await postPilot<RegisterRoleResponse>("/api/pilot/connections/role", {
         connectionId: connection.id,
         roleArn: effectiveRoleArn,
       });
@@ -653,11 +696,11 @@ export function OnboardAccount() {
       setNotice({
         tone: missingCapabilities.length === 0 ? "success" : "warning",
         title: missingCapabilities.length === 0
-          ? "Trust verified and customer role registered"
+          ? "Connection saved; discovery queued"
           : `Trust verified with ${missingCapabilities.length} unavailable capabilities`,
         message: missingCapabilities.length === 0
-          ? "AWS returned the expected caller identity, missing and incorrect ExternalIds were denied, and Sutra atomically activated the verified role."
-          : `The dedicated role is safe and active, but this customer omitted ${missingCapabilities.length} reviewed metadata actions. Sutra will report the affected collectors as unavailable instead of claiming coverage.`,
+          ? `AWS identified ${response.verification.callerIdentityArn} in account ${response.verification.accountId}. Missing and incorrect ExternalIds were denied, the verified role was saved, and inventory job ${response.collection.jobId} is queued.`
+          : `AWS identified ${response.verification.callerIdentityArn} in account ${response.verification.accountId}. The dedicated role is safe and saved, but this customer omitted ${missingCapabilities.length} reviewed metadata actions. Discovery is queued and will report affected collectors as unavailable instead of claiming coverage.`,
       });
       await refresh();
     } catch (caught) {
@@ -888,40 +931,62 @@ export function OnboardAccount() {
 
           {loading ? <div className="loading-state" role="status"><span className="loading-spinner" />Checking the AWS workspace…</div> : null}
 
+          {!loading && liveConnection?.status === "active" && !discoveryComplete ? (
+            <div className="discovery-progress" role="status">
+              <span aria-hidden="true" className="loading-spinner" />
+              <div>
+                <p className="eyebrow">Step 4 of 4 · Discovery</p>
+                <strong>{discoveryCanRetry ? "Inventory needs attention" : "Discovery is queued"}</strong>
+                <p>{collectionHealth?.message ?? "The saved AWS connection is waiting for its first durable inventory job. Inventory arrives asynchronously; you may leave this page safely."}</p>
+                <div className="heading-actions">
+                  <a className="button button-secondary" href="/dashboard">Return to dashboard</a>
+                  <button
+                    className="button button-primary"
+                    disabled={busy !== null || collectorMode !== "live"}
+                    onClick={() => discoveryCanRetry ? void runSync() : void refresh()}
+                    type="button"
+                  >
+                    {busy === "sync" ? "Retrying discovery…" : discoveryCanRetry ? "Retry discovery" : "Refresh progress"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {!loading && !liveConnection && collectorMode !== "live" ? (
             <div className="onboard-copy"><p className="eyebrow">Local-only safety boundary</p><h2>AWS trust onboarding is disabled</h2><p>The collector is running in deterministic fixture mode, so Sutra will not create a trust-role connection or contact AWS. Use Simulation runs to exercise the durable queue, CMDB, change history, findings, and exports with clearly labelled local evidence.</p><a className="button button-primary" href="/operations">Open Simulation runs</a></div>
           ) : null}
 
           {!loading && !liveConnection && collectorMode === "live" && canCreateConnection ? (
             <>
-              <form className="onboard-form aws-account-card" onSubmit={createConnection}>
+              <form className="onboard-form aws-account-card" noValidate onSubmit={createConnection}>
                 <h2 className="aws-account-card-title">New AWS Account</h2>
-                <label><span>Account Name</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer or company name" required /><small>Each connection is bound to one approved customer workspace and one AWS account.</small></label>
-                <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-invalid={accountId.length > 0 && !accountValid} required /><small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small></label>
-                {/* The reference presents authentication as two tabs. The tab
-                    switches the SAME connectionMethod state the radio cards
-                    set, so the wire contract is untouched: IAM Role shows the
-                    two role paths, Access & Secret Keys is the key path. */}
-                <div aria-label="Authenticate using" className="onboard-method-tabs" role="tablist">
-                  <button
-                    aria-selected={connectionMethod === "iam_role"}
-                    className="onboard-method-tab"
-                    onClick={() => selectOnboardPath(roleProvisioningMode === "customer_managed" ? "customer_managed_role" : "sutra_template_role")}
-                    role="tab"
-                    type="button"
-                  >
-                    IAM Role
-                  </button>
-                  <button
-                    aria-selected={connectionMethod === "static_credentials"}
-                    className="onboard-method-tab"
-                    onClick={() => selectOnboardPath("static_credentials")}
-                    role="tab"
-                    type="button"
-                  >
-                    Access & Secret Keys
-                  </button>
-                </div>
+                <label><span>Account Name</span><input value={customerName} maxLength={80} onChange={(event) => setCustomerName(event.target.value)} placeholder="Customer or company name" aria-describedby={formValidationVisible && customerName.trim().length < 2 ? "account-name-error" : undefined} aria-invalid={formValidationVisible && customerName.trim().length < 2} required />{formValidationVisible && customerName.trim().length < 2 ? <small className="field-error" id="account-name-error">Account name must be specified.</small> : <small>Each connection is bound to one approved customer workspace and one AWS account.</small>}</label>
+                <label><span>AWS account ID</span><input inputMode="numeric" maxLength={12} value={accountId} onChange={(event) => setAccountId(event.target.value.replace(/\D/gu, ""))} aria-describedby={formValidationVisible && !accountValid ? "aws-account-id-error" : undefined} aria-invalid={formValidationVisible && !accountValid} required />{formValidationVisible && !accountValid ? <small className="field-error" id="aws-account-id-error">A 12-digit AWS account ID must be specified.</small> : <small>{health?.mode === "fixture" ? "Fixture mode expects 123456789012." : "Exactly 12 digits from the client AWS account."}</small>}</label>
+                <fieldset className="onboard-method-cards">
+                  <legend>Authentication Type</legend>
+                  <label data-selected={connectionMethod === "iam_role" ? "true" : undefined}>
+                    <input
+                      checked={connectionMethod === "iam_role"}
+                      name="authentication-type"
+                      onChange={() => selectOnboardPath(roleProvisioningMode === "customer_managed" ? "customer_managed_role" : "sutra_template_role")}
+                      type="radio"
+                      value="iam_role"
+                    />
+                    <span><strong>IAM Role <em>Recommended</em></strong><small>Short-lived credentials, unique External ID, and a fixed least-privilege session ceiling.</small></span>
+                  </label>
+                  <label data-disabled={!staticCredentialsEnabled ? "true" : undefined} data-selected={connectionMethod === "static_credentials" ? "true" : undefined}>
+                    <input
+                      checked={connectionMethod === "static_credentials"}
+                      disabled={!staticCredentialsEnabled}
+                      name="authentication-type"
+                      onChange={() => selectOnboardPath("static_credentials")}
+                      type="radio"
+                      value="static_credentials"
+                    />
+                    <span><strong>Access &amp; Secret Keys</strong><small>{staticCredentialsEnabled ? "For dedicated read-only IAM users when role creation is impossible." : "Unavailable until Sutra's reviewed AWS Secrets Manager storage boundary is deployed."}</small></span>
+                  </label>
+                </fieldset>
                 <p className="onboard-guide-link">Check Sutra <a href="/onboard/guide">AWS Start Guide</a>.</p>
 
                 {/* The reference form shows External ID and Role ARN as fields
@@ -1064,8 +1129,8 @@ export function OnboardAccount() {
                 )}
                 </details>
                 <div className="aws-account-card-actions">
-                  <a className="button button-secondary" href="/welcome#connect">Select another cloud provider</a>
-                  <button className="button button-primary" type="submit" disabled={!accountValid || customerName.trim().length < 2 || customerManagedRoleError !== null || (regionSelectionMode === "explicit" && regions.split(",").every((region) => region.trim().length === 0)) || busy !== null}>{busy === "create" ? "Creating secure contract…" : "Continue"}</button>
+                  <a className="button button-secondary" href="/welcome#connect">Go back</a>
+                  <button className="button button-primary" type="submit" disabled={busy !== null}>{busy === "create" ? "Creating secure contract…" : "Continue"}</button>
                 </div>
               </form>
             </>
@@ -1118,7 +1183,7 @@ export function OnboardAccount() {
 
               {connection.permissionCapabilities && connection.permissionCapabilities.missingActions.length === 0 ? <div className="validation-result" role="status"><span>✓</span><div><strong>All reviewed inline-policy capabilities declared</strong><p>{connection.permissionCapabilities.grantedActions.length} actions are declared by the attested inline policy for permission pack <code>{connection.permissionPackVersion}</code>. Effective access is confirmed separately by collection results.</p></div></div> : connection.permissionCapabilities ? <div className="inline-warning" role="status"><strong>{connection.permissionCapabilities.missingActions.length} inline-policy capabilities omitted</strong><span>Not declared in the role policy: <code>{connection.permissionCapabilities.missingActions.slice(0, 8).join(", ")}</code>{connection.permissionCapabilities.missingActions.length > 8 ? ` and ${connection.permissionCapabilities.missingActions.length - 8} more` : ""}. Effective access can also be limited by permission boundaries, SCPs, or resource policies; collection coverage remains explicit.</span></div> : null}
 
-              {canDisplayInitialExternalId && oneTimeExternalId ? <label className="contract-field"><span>Pending-handoff ExternalId</span><div className="copy-field"><code>{oneTimeExternalId}</code><button type="button" onClick={() => void navigator.clipboard?.writeText(oneTimeExternalId)}>Copy</button></div><small>This value is visible only while the customer role is pending. Role registration closes the handoff permanently, and each delegated disclosure is audited.</small></label> : recoverableDraft && connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>The pending ExternalId handoff can be recovered.</strong><span>The previous response may have been lost. Retry the same stored operation to retrieve the original value; Sutra will not rotate or create a second contract.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void recoverConnectionHandoff()}>{busy === "create" ? "Recovering handoff…" : "Recover pending handoff"}</button></div> : connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>Your assigned onboarding handoff is ready.</strong><span>Only an MFA-verified customer administrator assigned to this exact customer can disclose it. The event is written to the audit chain before the value is returned.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void claimAssignedConnectionHandoff()}>{busy === "handoff" ? "Opening handoff…" : "Open assigned onboarding handoff"}</button></div> : <div className="inline-warning"><strong>ExternalId handoff is closed.</strong><span>{connectionOffboarded ? "This connection has been offboarded and no trust secret remains in Sutra's control plane." : connection.roleArn ? "The customer role has been registered, so Sutra will never display the initial ExternalId again." : "No pending onboarding handoff is available for this connection."}</span></div>}
+              {canDisplayInitialExternalId && oneTimeExternalId ? <label className="contract-field"><span>External ID</span><div className="copy-field"><code>{oneTimeExternalId}</code><button type="button" onClick={() => void copyExternalId()}>{externalIdCopyStatus === "copied" ? "Copied" : externalIdCopyStatus === "failed" ? "Copy blocked" : "Copy"}</button></div><small>This unique value is visible only while the customer role is pending. Role registration closes the handoff permanently, and each delegated disclosure is audited.</small><span className="sr-only" aria-live="polite">{externalIdCopyStatus === "copied" ? "External ID copied to clipboard" : externalIdCopyStatus === "failed" ? "Clipboard access was blocked; select and copy the External ID manually" : ""}</span></label> : recoverableDraft && connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>The pending ExternalId handoff can be recovered.</strong><span>The previous response may have been lost. Retry the same stored operation to retrieve the original value; Sutra will not rotate or create a second contract.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void recoverConnectionHandoff()}>{busy === "create" ? "Recovering handoff…" : "Recover pending handoff"}</button></div> : connection.status === "pending" && !connection.roleArn ? <div className="inline-warning"><strong>Your assigned onboarding handoff is ready.</strong><span>Only an MFA-verified customer administrator assigned to this exact customer can disclose it. The event is written to the audit chain before the value is returned.</span><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void claimAssignedConnectionHandoff()}>{busy === "handoff" ? "Opening handoff…" : "Open assigned onboarding handoff"}</button></div> : <div className="inline-warning"><strong>ExternalId handoff is closed.</strong><span>{connectionOffboarded ? "This connection has been offboarded and no trust secret remains in Sutra's control plane." : connection.roleArn ? "The customer role has been registered, so Sutra will never display the initial ExternalId again." : "No pending onboarding handoff is available for this connection."}</span></div>}
 
               <div className="deployment-parameters" aria-label="CloudFormation trust parameters">
                 <div><small>SessionNamePrefix</small><code>{createdRoleSessionName}</code></div>
@@ -1126,9 +1191,16 @@ export function OnboardAccount() {
                 <div><small>RoleName</small><code>{created?.trust.roleName ?? "SutraCollectorRole"}</code></div>
               </div>
 
-              <label className="contract-field"><span>Exact collector principal</span><div className="copy-field"><code>{principalArn ?? "Collector principal unavailable"}</code><button type="button" disabled={!principalArn} onClick={() => principalArn && void navigator.clipboard?.writeText(principalArn)}>Copy</button></div></label>
+              <label className="contract-field"><span>Trusted account (Sutra collector principal)</span><div className="copy-field"><code>{principalArn ?? "Collector principal unavailable"}</code><button type="button" disabled={!principalArn} onClick={() => principalArn && void navigator.clipboard?.writeText(principalArn)}>Copy</button></div></label>
 
-              {canDisplayInitialExternalId && quickLaunchUrl ? (
+              {createdRoleMode === "sutra_template" ? <section className="iam-role-panel" aria-labelledby="iam-role-panel-title">
+                <div className="iam-role-panel-heading"><div><p className="eyebrow">IAM Role</p><h3 id="iam-role-panel-title">Create the customer-owned role</h3></div>
+                  <div aria-label="IAM role creation method" className="iam-role-tabs" role="tablist">
+                    <button aria-selected={roleSetupTab === "quick"} onClick={() => setRoleSetupTab("quick")} role="tab" type="button">Quick launch</button>
+                    <button aria-selected={roleSetupTab === "manual"} onClick={() => setRoleSetupTab("manual")} role="tab" type="button">Manual creation</button>
+                  </div>
+                </div>
+              {roleSetupTab === "quick" && canDisplayInitialExternalId && quickLaunchUrl ? (
                 <section className="quick-launch-panel" aria-labelledby="quick-launch-title">
                   <div className="quick-launch-heading">
                     <div><p className="eyebrow">Customer-owned deployment</p><h3 id="quick-launch-title">Create the reviewed role in AWS</h3><p>Sutra pre-fills the exact trust parameters in AWS CloudFormation. The customer reviews and creates the stack in their own account.</p></div>
@@ -1142,11 +1214,12 @@ export function OnboardAccount() {
                   </ol>
                   <div className="quick-launch-history-warning"><strong>One-time browser handoff</strong><span>The ExternalId is placed only in the AWS Console URL fragment and this button disappears when the handoff closes. A visited URL can remain in browser history, so use a private browser window and close it after role registration. Never paste the URL into chat, tickets, or logs.</span></div>
                 </section>
-              ) : canDisplayInitialExternalId && createdRoleMode === "sutra_template" ? (
+              ) : roleSetupTab === "quick" && canDisplayInitialExternalId ? (
                 <div className="inline-warning"><strong>Use the manual CloudFormation path.</strong><span>{connection.partition !== "aws" ? "Quick launch currently supports only commercial AWS accounts." : !created?.deployment.publicTemplateUrl ? "The server does not have a reviewed public regional-S3 template URL configured." : "Sutra could not safely construct the quick-launch URL."} Download the template, upload it in the customer&apos;s CloudFormation console, and copy the displayed trust values into the matching parameters.</span></div>
               ) : null}
 
-              {createdRoleMode === "sutra_template" ? <div className="template-actions"><a className="button button-secondary" href={AWS_CUSTOMER_ROLE_TEMPLATE_PATH} download>Download least-privilege CloudFormation</a><span>Version <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> · SHA-256 <code>{AWS_CUSTOMER_ROLE_TEMPLATE_SHA256}</code>. Deploy with <code>CAPABILITY_NAMED_IAM</code>. This version grants exactly the read-only metadata, network-exposure, IAM posture, and AWS-native finding APIs the collector invokes, and never enables AWS security services. Agentless disk scanning is a separate stack parameter that defaults to false; it is the only setting that grants any write permission, and even when enabled the role carries an explicit deny on every destructive action.</span></div> : null}
+              {roleSetupTab === "manual" ? <div className="manual-creation-panel" role="tabpanel"><p>Download Sutra&apos;s generated, version-pinned CloudFormation template, upload it in the customer account, and enter the exact trust values shown above. The customer reviews every permission before creating the stack.</p><div className="template-actions"><a className="button button-secondary" href={AWS_CUSTOMER_ROLE_TEMPLATE_PATH} download>Download least-privilege CloudFormation</a><span>Version <code>{AWS_CUSTOMER_ROLE_TEMPLATE_VERSION}</code> · SHA-256 <code>{AWS_CUSTOMER_ROLE_TEMPLATE_SHA256}</code>. Deploy with <code>CAPABILITY_NAMED_IAM</code>. This version grants exactly the read-only metadata, network-exposure, IAM posture, and AWS-native finding APIs the collector invokes, and never enables AWS security services. Agentless disk scanning is a separate stack parameter that defaults to false; it is the only setting that grants any write permission, and even when enabled the role carries an explicit deny on every destructive action.</span></div><ol className="deployment-checklist"><li><b>1</b><span>Open CloudFormation in the customer&apos;s chosen Region and upload the downloaded template.</span></li><li><b>2</b><span>Enter the displayed collector principal, External ID, tenant ID, session prefix, and role name exactly.</span></li><li><b>3</b><span>Create the stack with <code>CAPABILITY_NAMED_IAM</code>, then copy <code>CustomerReadRoleArn</code> from Outputs.</span></li></ol></div> : null}
+              </section> : null}
 
               {createdRoleMode === "customer_managed" && customerManagedArtifacts ? <section className="quick-launch-panel" aria-labelledby="customer-role-downloads-title">
                 <div className="quick-launch-heading"><div><p className="eyebrow">Customer-managed deployment</p><h3 id="customer-role-downloads-title">Download the exact dedicated-role contract</h3><p>Use the Terraform or CloudFormation file for the complete deployable role. The JSON download is only the exact trust-policy fragment for customers who reproduce the same permission policy and required tags through their own IAM tooling. Every artifact is generated in this browser from the one-time server handoff.</p></div></div>
@@ -1193,8 +1266,8 @@ export function OnboardAccount() {
                 ) : null}
                 <p className="limitation-note">Your existing MFA-verified Sutra session authorizes this step. Sutra still proves the exact AWS account, role trust, permissions, tags, and incorrect-ExternalId denial before registration commits.</p>
                 <div className="aws-account-card-actions">
-                  <a className="button button-secondary" href="/welcome#connect">Select another cloud provider</a>
-                  <button className="button button-primary" type="submit" disabled={!roleValid || connectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Registering role…" : collectorMode === "live" ? connection.roleArn ? "Verify & update registered role" : "Verify & register customer role" : "Live collector required"}</button>
+                  <a className="button button-secondary" href="/welcome#connect">Go back</a>
+                  <button className="button button-primary" type="submit" disabled={!roleValid || connectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "role" ? "Checking connection…" : collectorMode === "live" ? connection.roleArn ? "Check connection again" : "Check connection" : "Live collector required"}</button>
                 </div>
               </form> : null}
 
@@ -1252,6 +1325,7 @@ export function OnboardAccount() {
 
               {credentialsRegistered && registeredAccessKeyLast4 ? <div className="validation-result" role="status"><span>✓</span><div><strong>Access key ····{registeredAccessKeyLast4} registered</strong><p>The collector verified the caller identity, stored the keys encrypted, and queued the first collection job. Neither key value will ever be displayed again.</p></div></div> : null}
 
+              {staticCredentialsEnabled ? <>
               <form className="onboard-form credentials-registration" onSubmit={registerCredentials} autoComplete="off">
                 <label><span>Access key ID</span><input type="password" autoComplete="off" spellCheck={false} maxLength={20} value={accessKeyId} onChange={(event) => setAccessKeyId(event.target.value.trim())} aria-invalid={accessKeyId.length > 0 && !accessKeyIdValid} required /><small>AKIA (long-lived) or ASIA (temporary) followed by exactly 16 uppercase letters or digits.</small></label>
                 <label><span>Secret access key</span><input type="password" autoComplete="off" spellCheck={false} maxLength={40} value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value.trim())} aria-invalid={secretAccessKey.length > 0 && !secretAccessKeyValid} required /><small>Exactly 40 characters. Sent once, stored encrypted by the collector, never displayed again.</small></label>
@@ -1264,6 +1338,7 @@ export function OnboardAccount() {
                 <div><p className="eyebrow">Step 3 of 4</p><h2>{credentialConnection.status === "active" ? "Account binding proven" : "Prove the account binding"}</h2><p>{credentialConnection.status === "active" ? "GetCallerIdentity confirmed the stored encrypted keys resolve to the expected AWS account, and the binding is re-proven on every collector session." : "Sutra proves GetCallerIdentity resolves the stored encrypted keys to the expected AWS account before any collection starts."}</p></div>
                 {credentialConnection.status === "active" ? <div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void revalidateTrust()}>{busy === "validate" ? "Revalidating credentials…" : "Revalidate credentials"}</button><button className="button button-primary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void runSync()}>{busy === "sync" ? "Collecting AWS metadata…" : collectorMode === "live" ? "Run inventory sync" : "Live collector required"}</button></div> : credentialConnection.status === "disabled" ? <span className="status-pill status-medium">Connection disabled</span> : <button className="button button-primary" type="button" disabled={!credentialsRegistered || busy !== null || collectorMode !== "live"} onClick={() => void validateAndSync()}>{busy === "validate" ? "Validating credentials…" : busy === "sync" ? "Publishing first snapshot…" : collectorMode === "live" ? "Validate credentials & run first sync" : "Live collector required"}</button>}
               </div>
+              </> : <div className="inline-warning" role="alert"><strong>Access-key onboarding is disabled.</strong><span>This legacy connection cannot validate, rotate, or collect until Sutra stores only an AWS Secrets Manager reference and resolves the secret at job execution. Disable or offboard it below, and use IAM Role for new onboarding.</span></div>}
 
               <section id="connection-lifecycle" className="connection-lifecycle" aria-labelledby="connection-lifecycle-title">
                 <div><p className="eyebrow">Trust lifecycle</p><h2 id="connection-lifecycle-title">Control or remove collector access</h2><p>These actions never delete CMDB snapshots. Offboarding erases the encrypted access keys from Sutra and asks the collector to erase its copy. It cannot deactivate the customer&apos;s IAM access keys; deactivate and delete them separately in the AWS IAM console.</p></div>
@@ -1271,7 +1346,7 @@ export function OnboardAccount() {
                   <button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => void disableConnection()}>{busy === "disable" ? credentialConnectionDisabled ? "Reconciling…" : "Disabling…" : credentialConnectionDisabled ? "Reconcile collector disable" : "Disable connection"}</button>
                   <button className="button button-danger" type="button" disabled={busy !== null} onClick={() => setConfirmingOffboard(true)}>Offboard access keys</button>
                 </div>
-                <div className="inline-warning"><strong>Rotate by re-submitting new keys.</strong><span>Create a new access key on the same dedicated IAM user, submit it through the form above, then deactivate and delete the old key in AWS IAM. Sutra replaces the stored encrypted keys after verification and never displays either value.</span></div>
+                {staticCredentialsEnabled ? <div className="inline-warning"><strong>Rotate by re-submitting new keys.</strong><span>Create a new access key on the same dedicated IAM user, submit it through the form above, then deactivate and delete the old key in AWS IAM. Sutra replaces the stored encrypted keys after verification and never displays either value.</span></div> : null}
                 {confirmingOffboard ? <div className="offboard-confirmation" role="group" aria-label="Confirm access-key offboarding"><strong>Confirm permanent access-key removal</strong><p>Enter AWS account ID <code>{credentialConnection.awsAccountId}</code> and a fresh authenticator code. Sutra will retain CMDB and audit evidence, but this connection cannot be reactivated. This does not deactivate the customer&apos;s IAM access keys; deactivate and delete them separately in AWS IAM.</p><input aria-label="AWS account ID confirmation" inputMode="numeric" maxLength={12} value={offboardConfirmation} onChange={(event) => setOffboardConfirmation(event.target.value.replace(/\D/gu, ""))} /><input aria-label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={offboardStepUpCode} onChange={(event) => setOffboardStepUpCode(event.target.value.replace(/\D/gu, ""))} /><div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => { setConfirmingOffboard(false); setOffboardConfirmation(""); setOffboardStepUpCode(""); }}>Cancel</button><button className="button button-danger" type="button" disabled={busy !== null || offboardConfirmation !== credentialConnection.awsAccountId || !/^\d{6}$/u.test(offboardStepUpCode)} onClick={() => void offboardConnection()}>{busy === "offboard" ? "Removing access keys…" : "Verify & confirm offboarding"}</button></div></div> : null}
               </section>
               </ConnectionWorkArea>
