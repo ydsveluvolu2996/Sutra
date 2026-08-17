@@ -95,11 +95,11 @@ test("credentials form posts to the fixed credentials route with masked, non-aut
   assert.match(source, /Access key ····/u);
 });
 
-test("access-key format and ASIA session-token requirements are enforced client-side", () => {
-  assert.match(source, /\^\(AKIA\|ASIA\)\[A-Z0-9\]\{16\}\$/u);
+test("access-key format is restricted to persistent AKIA IAM-user credentials", () => {
+  assert.match(source, /\^AKIA\[A-Z0-9\]\{16\}\$/u);
   assert.match(source, /AWS_SECRET_ACCESS_KEY_LENGTH = 40/u);
-  assert.match(source, /accessKeyId\.startsWith\("ASIA"\)/u);
-  assert.match(source, /!temporaryAccessKey \|\| sessionToken\.trim\(\)\.length > 0/u);
+  assert.doesNotMatch(source, /accessKeyId\.startsWith\("ASIA"\)|sessionToken/u);
+  assert.match(source, /temporary ASIA session credentials are not accepted/u);
 });
 
 test("credential secrets never enter the sessionStorage handoff draft path and are cleared on submit", () => {
@@ -121,7 +121,7 @@ test("credential secrets never enter the sessionStorage handoff draft path and a
   const credentials = source.slice(credentialsStart, credentialsEnd);
   assert.match(credentials, /setAccessKeyId\(""\)/u);
   assert.match(credentials, /setSecretAccessKey\(""\)/u);
-  assert.match(credentials, /setSessionToken\(""\)/u);
+  assert.doesNotMatch(credentials, /sessionToken/u);
 });
 
 test("role registration reuses the MFA-verified session without a second onboarding code", () => {

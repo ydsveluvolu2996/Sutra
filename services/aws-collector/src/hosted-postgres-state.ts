@@ -580,7 +580,9 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
     scope: ConnectionScope,
     connectionId: string,
     expectedRoleArn: string,
+    expectedSecretVersionId?: string,
   ): Promise<void> {
+    if (expectedSecretVersionId !== undefined) throw new RegistryStateError();
     assertScope(scope, connectionId);
     await this.mutate(scope.tenantId, connectionId, (connection, tombstoned) => {
       if (tombstoned || connection === null || connection.roleArn !== expectedRoleArn) {
@@ -602,7 +604,9 @@ export class HostedPostgresState implements HostedRequestReplayStore, HostedOper
     scope: ConnectionScope,
     connectionId: string,
     expectedRoleArn: string,
+    expectedSecretVersionId?: string,
   ): Promise<void> {
+    if (expectedSecretVersionId !== undefined) throw new RegistryStateError();
     assertScope(scope, connectionId);
     const client = await this.pool.connect();
     try {

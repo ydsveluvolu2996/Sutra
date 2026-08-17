@@ -95,11 +95,21 @@ const allowLiveAws = process.env.SUTRA_ALLOW_LIVE_AWS?.trim() || "false";
 const collectorPrincipalArn = process.env.SUTRA_COLLECTOR_PRINCIPAL_ARN?.trim()
   || "arn:aws:iam::999988887777:role/SutraLocalCollector";
 const brokerUrl = process.env.SUTRA_BROKER_URL?.trim() || "http://127.0.0.1:8788";
+const staticKeysEnabled = process.env.SUTRA_AWS_STATIC_KEYS_ENABLED?.trim() || "false";
+const awsRegion = process.env.AWS_REGION?.trim()
+  || process.env.AWS_DEFAULT_REGION?.trim()
+  || "ap-south-1";
 if (collectorMode !== "fixture" && collectorMode !== "live") {
   throw new Error("SUTRA_COLLECTOR_MODE must be exactly fixture or live");
 }
 if (allowLiveAws !== "true" && allowLiveAws !== "false") {
   throw new Error("SUTRA_ALLOW_LIVE_AWS must be exactly true or false");
+}
+if (staticKeysEnabled !== "true" && staticKeysEnabled !== "false") {
+  throw new Error("SUTRA_AWS_STATIC_KEYS_ENABLED must be exactly true or false");
+}
+if (!/^[a-z]{2}(?:-gov)?-[a-z]+-\d$/u.test(awsRegion)) {
+  throw new Error("AWS_REGION/AWS_DEFAULT_REGION must be an exact AWS Region");
 }
 if (/[\r\n]/u.test(collectorPrincipalArn) || !/^arn:aws:iam::[0-9]{12}:role\/[A-Za-z0-9+=,.@_/-]+$/u.test(collectorPrincipalArn)) {
   throw new Error("SUTRA_COLLECTOR_PRINCIPAL_ARN must be an exact IAM role ARN");
@@ -113,11 +123,17 @@ if (collectorMode === "live" && allowLiveAws !== "true") {
 if (collectorMode === "fixture" && allowLiveAws !== "false") {
   throw new Error("fixture collector mode cannot enable live AWS access");
 }
+if (staticKeysEnabled === "true" && (collectorMode !== "live" || allowLiveAws !== "true")) {
+  throw new Error("AWS static-key onboarding requires the live AWS collector boundary");
+}
 const collectorVars = [
   { name: "SUTRA_BROKER_URL", value: brokerUrl },
   { name: "SUTRA_COLLECTOR_MODE", value: collectorMode },
   { name: "SUTRA_ALLOW_LIVE_AWS", value: allowLiveAws },
   { name: "SUTRA_COLLECTOR_PRINCIPAL_ARN", value: collectorPrincipalArn },
+  { name: "SUTRA_AWS_STATIC_KEYS_ENABLED", value: staticKeysEnabled },
+  { name: "AWS_REGION", value: awsRegion },
+  { name: "AWS_DEFAULT_REGION", value: awsRegion },
 ];
 // The public contact form's delivery config must reach the Worker runtime (which
 // reads it from .dev.vars via `env`), not just the container process env —

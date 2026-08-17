@@ -252,6 +252,52 @@ Resources:
                 Action: secretsmanager:GetSecretValue
                 Resource:
                   Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/runtime/zoho-*
+        - PolicyName: ManageOnlySutraCustomerAwsCredentialSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # The retained single-node private beta runs the app and its
+              # loopback collector under one EC2 workload role. IAM therefore
+              # scopes the shared host boundary to opaque per-connection
+              # secrets under this exact prefix; it does not claim process-level
+              # isolation inside the container. No list, restore, replication,
+              # policy, tag-mutation, or unrestricted deletion action is granted.
+              - Sid: ManageOnlySutraCustomerAwsCredentialSecretVersions
+                Effect: Allow
+                Action:
+                  - secretsmanager:CreateSecret
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:PutSecretValue
+                  - secretsmanager:UpdateSecretVersionStage
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/customer-aws-credentials/v1/*
+              # Runtime reads must name both an immutable VersionId and one of
+              # the two live workflow labels. The same shared host role also
+              # manages those labels inside this prefix, as disclosed by the
+              # single-node trust boundary above.
+              - Sid: ReadOnlyCurrentOrPendingSutraCustomerCredentialVersion
+                Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/customer-aws-credentials/v1/*
+                Condition:
+                  StringEquals:
+                    secretsmanager:VersionStage:
+                      - AWSCURRENT
+                      - SUTRAPENDING
+                  "Null":
+                    secretsmanager:VersionId: "false"
+              # Offboarding is recoverable: the runtime must request exactly
+              # the minimum seven-day recovery window. Immediate force-delete
+              # requests carry no RecoveryWindowInDays and cannot match.
+              - Sid: ScheduleSutraCustomerAwsCredentialSecretDeletion
+                Effect: Allow
+                Action: secretsmanager:DeleteSecret
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:sutra/customer-aws-credentials/v1/*
+                Condition:
+                  NumericEquals:
+                    secretsmanager:RecoveryWindowInDays: 7
         - PolicyName: AssumeOnlyDedicatedSutraCustomerRoles
           PolicyDocument:
             Version: "2012-10-17"

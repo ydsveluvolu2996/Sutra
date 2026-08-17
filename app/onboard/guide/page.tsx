@@ -68,8 +68,9 @@ export default function OnboardingGuidePage() {
           <h3>Access &amp; Secret Keys</h3>
           <ol>
             <li>Create a dedicated read-only IAM user in the AWS account and generate an access key.</li>
-            <li>Enter the access key ID and secret (plus a session token for temporary keys). Sutra verifies the account with GetCallerIdentity and stores the keys encrypted in the collector; they never leave it.</li>
+            <li>Enter a dedicated IAM user&apos;s long-lived AKIA access key ID and secret. Temporary session credentials are not accepted. Sutra stages the values encrypted in AWS Secrets Manager, verifies the expected account with GetCallerIdentity, and promotes that exact secret version only after verification. GetCallerIdentity proves identity, not least privilege; the IAM policies you attach determine effective permissions.</li>
             <li>Wherever the key cannot read a source, collection reports that source as unavailable — never as healthy or zero.</li>
+            <li>Disable blocks further use but retains the secret. Offboard blocks use and schedules the secret for deletion after a seven-day recovery window; you must still deactivate and delete the IAM access key in AWS.</li>
           </ol>
         </section>
 

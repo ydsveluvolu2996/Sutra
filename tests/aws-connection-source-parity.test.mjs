@@ -71,18 +71,19 @@ test("the lifecycle routes accept static-credential connections", async () => {
   }
 });
 
-test("offboarding is idempotent for a static-credential connection", async () => {
-  // A static-credential connection pins roleArn to the empty string for its
-  // whole life, so `roleArn === null` cannot be the already-offboarded test for
-  // it the way it is for a trust role.
+test("static-credential offboarding always requires recent MFA", async () => {
+  // Disable retains the customer secret reference, so a disabled static
+  // connection is not offboarded. Only the trust-role idempotency case may
+  // bypass a second step-up check after its role ARN has already been cleared.
   const body = await readFile(
     new URL("../app/api/pilot/connections/offboard/route.ts", import.meta.url),
     "utf8",
   );
   assert.match(
     body,
-    /alreadyOffboarded = current\.status === "disabled"\s*\n?\s*&& \(current\.sourceKind === "aws_static_credentials" \|\| current\.roleArn === null\)/u,
+    /alreadyOffboarded = current\.status === "disabled"\s*\n?\s*&& current\.sourceKind === "aws_trust_role"\s*\n?\s*&& current\.roleArn === null/u,
   );
+  assert.match(body, /if \(!alreadyOffboarded\) requireRecentMfa\(actor\.authenticated\)/u);
 });
 
 test("role-only paths that must not widen are still role-only", async () => {

@@ -28,8 +28,8 @@ const PRINCIPLES: Array<{ n: string; h: string; p: string }> = [
   },
   {
     n: "02",
-    h: "Read-only by construction",
-    p: "Access is a customer-owned IAM role assumed with temporary STS credentials, and no customer access keys ever enter the browser or the control plane. The role is read-only apart from one opt-in you control: agentless disk scanning, which may create snapshots it tags itself and can never delete anything.",
+    h: "Prefer temporary credentials",
+    p: "Our recommended path assumes a customer-owned IAM role with temporary STS credentials and stores no customer access key. When a customer cannot create a role, the optional access-key path stores a dedicated IAM user credential encrypted in AWS Secrets Manager; the customer owns its IAM permissions and rotation.",
   },
   {
     n: "03",
@@ -57,7 +57,7 @@ export default function AboutPage() {
             Our mission is to give managed service providers an evidence-honest, read-only-by-default cloud-operations and
             security platform for AWS and Amazon EKS — one that unifies inventory, reachability-backed security,
             cost and compliance readiness, and cites the exact observation behind every result. No agents on your
-            workloads, no stored access keys, no verdict you have to take on faith.
+            workloads, an IAM role recommended by default, no verdict you have to take on faith.
           </p>
         </section>
 

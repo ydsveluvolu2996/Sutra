@@ -10,9 +10,12 @@ S3 buckets are retained only for their server-reported selected Region.
 ## Deployment requirement
 
 **Run this as an AWS-hosted backend workload using AWS workload identity. Do not run
-it in Cloudflare Workers, a browser, the dashboard process, or any client-accessible
-runtime.** Suitable targets include ECS/Fargate task roles, EKS Pod Identity/IRSA,
-or a Lambda execution role in the vendor security-tooling account.
+it in Cloudflare Workers, a browser, or any client-accessible runtime.** Suitable
+isolated targets include ECS/Fargate task roles, EKS Pod Identity/IRSA, or a Lambda
+execution role in the vendor security-tooling account. The retained single-node
+private beta embeds the loopback collector beside the dashboard under one EC2
+instance role; that is explicitly one shared host/IAM trust boundary, not
+collector-only process isolation.
 
 `createWorkloadIdentityRoleBroker` intentionally creates the source STS client
 without static credentials. In production, the AWS SDK default provider chain must
@@ -52,6 +55,16 @@ an HTTP/queue boundary.
   scan `PARTIAL`; it does not erase successfully observed resources.
 - Errors intentionally omit the External ID, STS credential values, SDK request
   input, and original AWS error object. Logging code must maintain that property.
+- The optional path accepts only a dedicated IAM user's long-lived `AKIA` key;
+  temporary `ASIA` session credentials and session tokens are rejected. The key
+  is written only to an opaque, per-connection Secrets Manager secret, staged
+  under `SUTRAPENDING`, verified as a dedicated IAM-user identity, and promoted
+  to `AWSCURRENT` only after the control-plane commit. The registry persists
+  references, never key values, in this reviewed live path.
+- Static credential reads always specify the full secret ARN, immutable VersionId,
+  and either `AWSCURRENT` (collection/revalidation) or `SUTRAPENDING` (candidate
+  proof). Scope embedded inside the decrypted document must match tenant,
+  connection, expected account, and partition before use.
 
 `markOnboardingVerified` must use a conditional database update so stale workers
 cannot activate a connection that changed after verification.

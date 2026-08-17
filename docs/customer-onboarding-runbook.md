@@ -18,8 +18,9 @@ service-account tokens, pod logs, exec sessions, packet payloads, DNS query
 contents, HTTP headers, raw Falco output, registry credentials, signing private
 keys, or kubeconfigs. With the recommended IAM role method Sutra also stores no
 long-lived AWS credentials; only the optional access-key onboarding method
-stores the customer-supplied access keys, encrypted and owned by Sutra's
-collector (see `docs/aws-static-credential-onboarding.md`).
+stores the customer-supplied access keys encrypted in a versioned AWS Secrets
+Manager secret. The registry retains only a non-secret reference (see
+`docs/aws-static-credential-onboarding.md`).
 
 ## Prerequisites
 
@@ -27,8 +28,9 @@ collector (see `docs/aws-static-credential-onboarding.md`).
 2. Administrator access to that account through your own SSO. Sutra supports
    two AWS onboarding methods: the recommended **IAM role** method never asks
    for AWS access keys, while the optional **Access keys** method asks for the
-   access key ID and secret of a dedicated read-only IAM user (never root or
-   administrator keys) and stores them encrypted in Sutra's collector. Prefer
+   long-lived `AKIA` access key ID and secret of a dedicated read-only IAM user
+   (never root, administrator, or temporary `ASIA` credentials) and stores them
+   encrypted in AWS Secrets Manager. Prefer
    the IAM role method whenever your organization can deploy CloudFormation or
    Terraform; see `docs/aws-static-credential-onboarding.md` before choosing
    the access-key method.
@@ -47,7 +49,8 @@ Start at `/onboard`. Step 1 offers a **Connection method** selector: the
 default, recommended **IAM role (CloudFormation)** method described in the rest
 of this section, or the alternative **Access keys** method, which skips role
 deployment entirely and registers a dedicated read-only IAM user's access keys
-that the collector stores encrypted. The access-key method has real trade-offs
+that the collector stores in a version-bound AWS Secrets Manager secret. The
+access-key method has real trade-offs
 (no STS session-policy ceiling, no trust-policy attestation, customer-owned key
 rotation) and is documented in `docs/aws-static-credential-onboarding.md`.
 

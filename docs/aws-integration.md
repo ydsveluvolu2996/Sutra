@@ -145,24 +145,25 @@ the session policy as a substitute for a dedicated least-privilege role.
 Some customers cannot deploy a cross-account IAM role (no CloudFormation or
 Terraform change process, restrictive change windows, sandbox accounts). For
 them the onboarding UI offers a second first-class method: the customer
-supplies a dedicated read-only IAM user's access key ID and secret access key
-(plus a session token when the key ID starts with `ASIA`, i.e. temporary
-credentials), submitted once through the authenticated onboarding session to
+supplies a dedicated read-only IAM user's long-lived `AKIA` access key ID and
+secret access key, submitted once through the authenticated onboarding session to
 `POST /api/pilot/connections/credentials`.
 
 Properties of this path:
 
-- **Collector-owned encrypted storage.** The keys are stored encrypted by the
-  collector only. The control plane, browser, logs, queues, and API responses
-  never carry or echo the secret; success responses return only the last four
-  characters of the access key ID for display.
+- **Version-bound AWS Secrets Manager storage.** The collector writes the key
+  to an opaque per-connection secret as `SUTRAPENDING`, verifies that exact
+  VersionId, and moves `AWSCURRENT` only after proof. The database and encrypted
+  registry store only a full ARN, VersionId, and last four; logs, queues, audit
+  events, and API responses never carry or echo the secret.
 - **GetCallerIdentity account binding on every session.** Registration commits
   only after `sts:GetCallerIdentity` proves the keys resolve to the expected
   onboarding account, and the same binding is re-proven at the start of every
   collector session. A mismatch fails closed and quarantines the connection.
-- **900-second in-memory session cap.** Decrypted credentials live in worker
-  memory for at most 900 seconds per session before they are dropped and
-  re-derived; they are never persisted outside the encrypted store.
+- **Just-in-time, stage-bound reads.** Each operation asks Secrets Manager for
+  the stored exact VersionId plus `AWSCURRENT`; candidate proof uses the exact
+  VersionId plus `SUTRAPENDING`. There is no fallback to ambient credentials,
+  `AWSPREVIOUS`, or an unlabeled version.
 
 Inherent limitations versus the role method — state these plainly to customers:
 
@@ -176,13 +177,19 @@ Inherent limitations versus the role method — state these plainly to customers
   drift proofs from §2.1-2.2 do not apply. Account binding via
   GetCallerIdentity is the only cryptographic-adjacent check available.
 - **Customer-owned rotation.** AKIA keys do not expire; the customer must
-  rotate them and re-submit through the same onboarding step. ASIA keys expire
-  on AWS's schedule and stop collection until re-submitted. The role method's
-  temporary STS credentials rotate automatically.
+  rotate them and re-submit through the same onboarding step. Temporary ASIA
+  session credentials are rejected. The role method's temporary STS
+  credentials rotate automatically.
 
 The IAM role method remains the recommended default, and FinOps per-source
 verticals currently require it. See
 `docs/aws-static-credential-onboarding.md` for the customer-facing runbook.
+
+The retained single-node private beta runs the application and loopback
+collector under one EC2 instance role, so they are one host/IAM trust boundary.
+The policy is path- and stage-scoped, but it is not process isolation. A hosted
+multi-workload deployment must move Secrets Manager reads to a separate broker
+task role before enabling this method there.
 
 ### Permission-pack upgrade order
 

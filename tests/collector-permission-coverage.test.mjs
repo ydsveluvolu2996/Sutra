@@ -62,6 +62,15 @@ const COLLECTOR_COMMANDS = {
   // and is bound to the envelope's exact encryption context.
   GenerateDataKeyCommand: { action: "kms:GenerateDataKey", scope: "vendor_cryptographic" },
   DecryptCommand: { action: "kms:Decrypt", scope: "vendor_cryptographic" },
+  // Versioned customer credential storage lives in Sutra's own Secrets
+  // Manager namespace under the broker workload role. These are vendor-side
+  // lifecycle calls, never grants in the customer onboarding role.
+  CreateSecretCommand: { action: "secretsmanager:CreateSecret", scope: "vendor_secret_management" },
+  DescribeSecretCommand: { action: "secretsmanager:DescribeSecret", scope: "vendor_secret_management" },
+  GetSecretValueCommand: { action: "secretsmanager:GetSecretValue", scope: "vendor_secret_management" },
+  PutSecretValueCommand: { action: "secretsmanager:PutSecretValue", scope: "vendor_secret_management" },
+  UpdateSecretVersionStageCommand: { action: "secretsmanager:UpdateSecretVersionStage", scope: "vendor_secret_management" },
+  DeleteSecretCommand: { action: "secretsmanager:DeleteSecret", scope: "vendor_secret_management" },
   // Reads an agentless scan's published findings from SUTRA's OWN bucket. Vendor
   // scope, deliberately: this is never a customer permission, and putting it in the
   // onboarding template would misrepresent what Sutra asks customers to grant.
@@ -455,7 +464,8 @@ test("every AWS command the collector constructs is mapped to its permission act
   // genuinely writes — but not thereby unbounded: the next test pins the exact set,
   // so a new write verb cannot be slipped in under this label.
   for (const [command, { action, scope }] of Object.entries(COLLECTOR_COMMANDS)) {
-    if (scope === "agentless" || scope === "vendor_cryptographic" || scope === "finops_launch") continue;
+    if (scope === "agentless" || scope === "vendor_cryptographic"
+      || scope === "vendor_secret_management" || scope === "finops_launch") continue;
     assert.match(action, READ_ONLY_VERBS, `${command} maps to non-read-only action ${action}`);
   }
 });

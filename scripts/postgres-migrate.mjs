@@ -142,6 +142,7 @@ const migrationFiles = [
   "0128_aws_org_scope_and_connection_addons.sql",
   "0129_organization_plan.sql",
   "0130_organization_onboarding.sql",
+  "0131_aws_static_credential_references.sql",
 ];
 const migrations = await Promise.all(migrationFiles.map(async (file) => {
   const source = await readFile(resolve(root, "postgres/migrations", file), "utf8");

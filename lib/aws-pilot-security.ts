@@ -125,7 +125,6 @@ export interface AwsStaticCredentialsSubmission {
   readonly connectionId: string;
   readonly accessKeyId: string;
   readonly secretAccessKey: string;
-  readonly sessionToken: string | null;
 }
 
 export interface LocalAwsConnectionIdentity {
@@ -362,28 +361,22 @@ export function parseAwsConnectionDraftRequest(value: unknown): AwsConnectionDra
   };
 }
 
-const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/u;
+const STATIC_ACCESS_KEY_ID = /^AKIA[A-Z0-9]{16}$/u;
 const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/u;
-const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
 
 /**
  * Strict boundary for the one-request static credential submission. Exact keys
- * only; a session token is required for temporary (ASIA) keys and forbidden
- * for long-lived (AKIA) keys. Error messages deliberately never echo any part
- * of the submitted material.
+ * only. Persistent onboarding accepts a long-lived key from a dedicated IAM
+ * user; temporary session credentials are deliberately rejected because their
+ * expiry cannot be made durable. Error messages never echo submitted material.
  */
 export function parseAwsStaticCredentialsSubmission(
   value: unknown,
 ): AwsStaticCredentialsSubmission {
-  const candidate = typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-  const hasSessionToken = candidate !== null && Object.hasOwn(candidate, "sessionToken");
   const record = exactRecord(value, [
     "connectionId",
     "accessKeyId",
     "secretAccessKey",
-    ...(hasSessionToken ? ["sessionToken"] : []),
   ]);
   if (typeof record.connectionId !== "string" || !/^conn_[a-f0-9]{32}$/u.test(record.connectionId)) {
     invalidInput("The connection identifier is invalid");
@@ -394,24 +387,10 @@ export function parseAwsStaticCredentialsSubmission(
   if (typeof record.secretAccessKey !== "string" || !STATIC_SECRET_ACCESS_KEY.test(record.secretAccessKey)) {
     invalidInput("Enter a valid AWS secret access key");
   }
-  const temporaryKey = record.accessKeyId.startsWith("ASIA");
-  if (temporaryKey && !hasSessionToken) {
-    invalidInput("Temporary AWS access keys require a session token");
-  }
-  if (!temporaryKey && hasSessionToken) {
-    invalidInput("Long-lived AWS access keys must not include a session token");
-  }
-  if (
-    hasSessionToken &&
-    (typeof record.sessionToken !== "string" || !STATIC_SESSION_TOKEN.test(record.sessionToken))
-  ) {
-    invalidInput("Enter a valid AWS session token");
-  }
   return {
     connectionId: record.connectionId,
     accessKeyId: record.accessKeyId,
     secretAccessKey: record.secretAccessKey,
-    sessionToken: hasSessionToken ? record.sessionToken as string : null,
   };
 }
 

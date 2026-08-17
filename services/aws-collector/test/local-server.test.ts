@@ -502,6 +502,10 @@ test("signed loopback fixture API completes register, trust verification, and sy
       version: "0.2.0-pilot",
       principalArn: "arn:aws:iam::999988887777:role/SutraLocalCollector",
       sourceAccountId: "999988887777",
+      staticCredentials: {
+        backend: "aws-secrets-manager-reference-v1",
+        ready: false,
+      },
       message: "Fixture collector ready; no AWS API calls will be made.",
     });
 

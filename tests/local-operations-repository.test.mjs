@@ -830,6 +830,10 @@ describe("AWS trust health remains separate from collection health", () => {
         "validating",
       );
       await assert.rejects(
+        pilotRepository.createSyncRun(LIVE_CONNECTION_ID),
+        (error) => error?.code === "INVALID_STATE" && /before running inventory/u.test(error.message),
+      );
+      await assert.rejects(
         pilotRepository.markConnectionValidated(
           LIVE_CONNECTION_ID,
           "usr_local_operations_test",

@@ -7,7 +7,7 @@ import LegalShell from "../components/legal-shell";
 export const metadata: Metadata = publicPageMetadata({
   path: "/security",
   title: "Security",
-  description: "How Sutra secures your data — read-only-by-default, customer-owned IAM access with a unique ExternalId, one opt-in write grant that can never delete anything, no stored access keys, tenant isolation and evidence-cited findings.",
+  description: "How Sutra secures your data — a recommended customer-owned IAM role, an optional AWS Secrets Manager-backed access-key path, tenant isolation and evidence-cited findings.",
 });
 
 export default function SecurityPage() {
@@ -15,12 +15,12 @@ export default function SecurityPage() {
     <LegalShell
       kicker="Security"
       title={<>Security is a <span className="accent">product feature.</span></>}
-      lead="Sutra is built so that the platform can be useful without ever holding privileged access to your cloud. Access is read-only by default and customer-owned, credentials stay in your account, and every finding is traced back to what was actually observed."
+      lead="Sutra recommends a customer-owned, read-only-by-default IAM role with short-lived STS sessions. When role creation is impossible, an optional access-key method stores the customer-supplied credential encrypted in AWS Secrets Manager. Every finding is traced back to what was actually observed."
     >
       <section className="lx-legal-section">
         <h2>Read-only by default, customer-owned access</h2>
         <p>
-          Sutra connects to your environment through an IAM role that you create and own from a CloudFormation
+          Sutra&apos;s recommended connection method uses an IAM role that you create and own from a CloudFormation
           template we provide. By default the role grants only read, metadata-scoped permission packs — no write
           permissions at all. You can inspect exactly what it allows before you deploy it, and revoke it at any
           time.
@@ -67,12 +67,19 @@ export default function SecurityPage() {
       </section>
 
       <section className="lx-legal-section">
-        <h2>No customer access keys stored</h2>
+        <h2>Credential handling by connection method</h2>
         <p>
-          A separate collector workload assumes your role using temporary AWS STS credentials and performs
-          bounded, regional discovery. <b>We never store customer access keys</b>, and long-lived credentials
-          never enter the browser or the web control plane. The application receives normalized, scoped evidence
-          — not keys.
+          With the recommended IAM Role method, the collector assumes your role using temporary AWS STS
+          credentials; Sutra stores no customer access key. With the optional Access &amp; Secret Keys method, you
+          submit a dedicated IAM user credential through the authenticated onboarding form. The collector stages
+          that value encrypted in a versioned AWS Secrets Manager secret and promotes it only after account
+          verification. The web control plane persists only a non-secret secret reference and the access-key
+          identifier&apos;s last four characters; submitted values are cleared from the form and never returned.
+        </p>
+        <p>
+          Disabling an access-key connection blocks live use but retains its secret. Offboarding blocks use and
+          schedules the secret for deletion with a seven-day recovery window. Neither action revokes the IAM key
+          in your AWS account; you must deactivate and delete that key separately.
         </p>
       </section>
 
@@ -83,6 +90,7 @@ export default function SecurityPage() {
           <li>A unique, platform-generated ExternalId scopes the trust relationship to your workspace.</li>
           <li>Positive and negative trust validation confirms the role can be assumed only as intended.</li>
           <li>An exact vendor workload-role principal — not a wildcard — is authorized to assume the role.</li>
+          <li>For the optional access-key method, GetCallerIdentity verifies account identity only. It does not prove least privilege; customer-managed IAM policies determine the key&apos;s effective permissions.</li>
         </ul>
       </section>
 

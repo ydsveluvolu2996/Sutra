@@ -180,5 +180,9 @@ export interface CollectorHealth {
   readonly version: string;
   readonly principalArn: string | null;
   readonly sourceAccountId: string | null;
+  readonly staticCredentials: {
+    readonly backend: "aws-secrets-manager-reference-v1";
+    readonly ready: boolean;
+  };
   readonly message: string;
 }

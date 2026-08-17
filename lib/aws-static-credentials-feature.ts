@@ -1,10 +1,9 @@
 /**
- * Static AWS keys remain fail-closed until the reviewed backend stores only a
- * Secrets Manager reference in PostgreSQL and resolves the value at collector
- * execution time. The older collector-encrypted registry is intentionally not
- * sufficient for this feature gate.
+ * This compile-time review gate records that the reference-only AWS Secrets
+ * Manager backend is present. Deployments still have to opt in with the exact
+ * runtime flag, so older or partially updated hosts remain fail-closed.
  */
-export const AWS_STATIC_KEYS_SECRETS_MANAGER_BACKEND_READY = false;
+export const AWS_STATIC_KEYS_SECRETS_MANAGER_BACKEND_READY = true;
 
 export interface AwsStaticCredentialsFeatureEnvironment {
   readonly [name: string]: string | undefined;
@@ -23,7 +22,7 @@ export function assertAwsStaticCredentialsOnboardingEnabled(
 ): void {
   if (isAwsStaticCredentialsOnboardingEnabled(environment)) return;
   throw Object.assign(
-    new Error("Access-key onboarding is unavailable until the reviewed AWS Secrets Manager storage boundary is deployed"),
+    new Error("Access-key onboarding is unavailable unless this deployment enables the reviewed AWS Secrets Manager storage boundary"),
     { code: "INVALID_STATE" },
   );
 }

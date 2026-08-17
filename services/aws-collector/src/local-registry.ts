@@ -61,6 +61,11 @@ import {
   type AwsRegionSelection,
   type LocalAwsPartition,
 } from "./aws-region-selection.js";
+import {
+  type AwsStaticCredentialSecretStore,
+  type StaticCredentialSecretReference,
+  type StaticCredentialSecretState,
+} from "./static-credential-secret-store.js";
 
 const REGISTRY_AAD = Buffer.from("sutra-local-registry:v1", "utf8");
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@+-]{0,127}$/;
@@ -72,9 +77,8 @@ const PARTITIONS = new Set(["aws", "aws-us-gov", "aws-cn"]);
 const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
 const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
-const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/;
+const STATIC_ACCESS_KEY_ID = /^AKIA[A-Z0-9]{16}$/;
 const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/;
-const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
 const MAX_CONNECTIONS = 10_000;
 
 export type { LocalAwsPartition } from "./aws-region-selection.js";
@@ -84,6 +88,8 @@ export interface RegisteredAwsConnection extends StoredAwsConnection {
   readonly enabledRegions: AwsRegionSelection;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** Persisted pointer only; runtime callers receive hydrated key material. */
+  readonly staticCredentialSecretState?: StaticCredentialSecretState;
 }
 
 export interface RegisterAwsConnectionInput {
@@ -130,6 +136,9 @@ export interface EncryptedFileConnectionRegistryOptions {
   readonly filePath: string;
   readonly encryptionKey: string;
   readonly now?: () => Date;
+  readonly staticCredentialSecretStore?: AwsStaticCredentialSecretStore;
+  /** Test-only fault seam for atomic registry publication. */
+  readonly testOnlyWriteFaultInjector?: (point: "beforeRename" | "afterRename") => void;
 }
 
 /**
@@ -141,6 +150,9 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
   private readonly filePath: string;
   private readonly key: Buffer;
   private readonly now: () => Date;
+  private readonly staticCredentialSecretStore: AwsStaticCredentialSecretStore | null;
+  private readonly testOnlyWriteFaultInjector:
+    ((point: "beforeRename" | "afterRename") => void) | null;
   private writeTail: Promise<void> = Promise.resolve();
 
   public constructor(options: EncryptedFileConnectionRegistryOptions) {
@@ -150,6 +162,8 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     this.filePath = options.filePath;
     this.key = decodeAes256Key(options.encryptionKey);
     this.now = options.now ?? (() => new Date());
+    this.staticCredentialSecretStore = options.staticCredentialSecretStore ?? null;
+    this.testOnlyWriteFaultInjector = options.testOnlyWriteFaultInjector ?? null;
   }
 
   public async resolve(
@@ -222,12 +236,46 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     ) {
       return null;
     }
-    return structuredClone(connection);
+    return await this.hydrateStaticCredential(connection, "active");
+  }
+
+  /** Candidate-only resolver used by the verification endpoint during rotation. */
+  public async getStaticCredentialCandidate(
+    scope: ConnectionScope,
+    connectionId: string,
+  ): Promise<RegisteredAwsConnection | null> {
+    assertScope(scope, connectionId);
+    await this.writeTail;
+    const document = await this.readDocument();
+    const connection = document.connections[connectionKey(scope.tenantId, connectionId)];
+    if (connection === undefined || connection.tenantId !== scope.tenantId
+      || connection.connectionId !== connectionId) return null;
+    return await this.hydrateStaticCredential(connection, "candidate");
+  }
+
+  public async getStaticCredentialSecretReference(
+    scope: ConnectionScope,
+    connectionId: string,
+  ): Promise<StaticCredentialSecretReference | null> {
+    assertScope(scope, connectionId);
+    await this.writeTail;
+    const connection = (await this.readDocument())
+      .connections[connectionKey(scope.tenantId, connectionId)];
+    if (connection === undefined || connection.tenantId !== scope.tenantId
+      || connection.connectionId !== connectionId) return null;
+    const reference = connection.staticCredentialSecretState?.staged
+      ?? connection.staticCredentialSecretState?.active;
+    return reference === undefined ? null : structuredClone(reference);
   }
 
   public async upsert(input: RegisterAwsConnectionInput): Promise<void> {
     const parsed = parseConnectionInput(input);
-    await this.mutate((document) => {
+    let pendingMaterialization: {
+      readonly scope: ReturnType<typeof staticSecretScope>;
+      readonly credentials: AwsStaticCredentialMaterial;
+      readonly prepared: StaticCredentialSecretReference;
+    } | null = null;
+    await this.mutateAsync(async (document) => {
       const key = connectionKey(parsed.tenantId, parsed.connectionId);
       if (document.tombstones[key] !== undefined) {
         throw new RegistryStateError();
@@ -237,7 +285,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         throw new RegistryStateError();
       }
       const timestamp = this.now().toISOString();
-      const unchanged =
+      const metadataUnchanged =
         previous !== undefined &&
         previous.expectedAccountId === parsed.expectedAccountId &&
         previous.partition === parsed.partition &&
@@ -248,53 +296,115 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         previous.expectedRolePath === parsed.expectedRolePath &&
         previous.expectedRoleName === parsed.expectedRoleName &&
         previous.credentialKind === parsed.credentialKind &&
-        staticCredentialsEqual(previous.staticCredentials, parsed.staticCredentials) &&
         arraysEqual(previous.enabledRegions, parsed.enabledRegions);
+
+      let nextConnection: RegisteredAwsConnection;
+      if (parsed.credentialKind === "static_credentials"
+        && this.staticCredentialSecretStore !== null) {
+        if (parsed.staticCredentials === undefined) throw new RegistryIntegrityError();
+        // A deployment that turns on the Secrets Manager backend must never
+        // silently migrate a legacy file-stored key. The customer re-submits it
+        // through the reviewed path instead.
+        if (previous?.credentialKind === "static_credentials"
+          && previous.staticCredentialSecretState === undefined) {
+          throw new RegistryStateError();
+        }
+        const previousSecretState = previous?.staticCredentialSecretState;
+        const existingArn = previousSecretState?.active?.secretArn
+          ?? previousSecretState?.staged?.secretArn;
+        const prepared = await this.staticCredentialSecretStore.prepare(
+          staticSecretScope(parsed),
+          parsed.staticCredentials,
+          existingArn,
+        );
+        const { staticCredentials: _requestMaterial,
+          staticCredentialSecretState: _requestState, ...metadata } = parsed;
+        void _requestMaterial;
+        void _requestState;
+        const active = previousSecretState?.active;
+        pendingMaterialization = {
+          scope: staticSecretScope(parsed),
+          credentials: parsed.staticCredentials,
+          prepared,
+        };
+        const keepActive = active !== undefined
+          && (previous?.status === "ACTIVE" || previous?.status === "DEGRADED");
+        nextConnection = {
+          ...metadata,
+          ...(metadataUnchanged && previous?.foundationalFinopsContracts !== undefined
+            ? { foundationalFinopsContracts: structuredClone(previous.foundationalFinopsContracts) }
+            : {}),
+          ...(metadataUnchanged && previous?.finopsSourceContracts !== undefined
+            ? { finopsSourceContracts: structuredClone(previous.finopsSourceContracts) }
+            : {}),
+          ...(metadataUnchanged && previous?.computeOptimizerExportObjectContracts !== undefined
+            ? { computeOptimizerExportObjectContracts:
+                structuredClone(previous.computeOptimizerExportObjectContracts) }
+            : {}),
+          ...(metadataUnchanged && previous?.computeOptimizerExportLaunchContracts !== undefined
+            ? { computeOptimizerExportLaunchContracts:
+                structuredClone(previous.computeOptimizerExportLaunchContracts) }
+            : {}),
+          staticCredentialSecretState: {
+            ...(active === undefined ? {} : { active }),
+            staged: prepared,
+          },
+          status: keepActive ? previous.status : "PENDING",
+          permissionPackVersion: keepActive
+            ? previous.permissionPackVersion
+            : LEGACY_PERMISSION_PACK_VERSION,
+          createdAt: previous?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        };
+      } else {
+        const unchanged = metadataUnchanged
+          && staticCredentialsEqual(previous?.staticCredentials, parsed.staticCredentials);
+        nextConnection = {
+          ...parsed,
+          ...(unchanged && previous?.foundationalFinopsContracts !== undefined
+            ? { foundationalFinopsContracts: structuredClone(previous.foundationalFinopsContracts) }
+            : {}),
+          ...(unchanged && previous?.finopsSourceContracts !== undefined
+            ? { finopsSourceContracts: structuredClone(previous.finopsSourceContracts) }
+            : {}),
+          ...(unchanged && previous?.computeOptimizerExportObjectContracts !== undefined
+            ? { computeOptimizerExportObjectContracts:
+                structuredClone(previous.computeOptimizerExportObjectContracts) }
+            : {}),
+          ...(unchanged && previous?.computeOptimizerExportLaunchContracts !== undefined
+            ? { computeOptimizerExportLaunchContracts:
+                structuredClone(previous.computeOptimizerExportLaunchContracts) }
+            : {}),
+          status: unchanged ? previous!.status : "PENDING",
+          permissionPackVersion: unchanged
+            ? previous!.permissionPackVersion
+            : LEGACY_PERMISSION_PACK_VERSION,
+          createdAt: previous?.createdAt ?? timestamp,
+          updatedAt: timestamp,
+        };
+      }
 
       return {
         version: 3,
         connections: {
           ...document.connections,
-          [key]: {
-            ...parsed,
-            ...(unchanged && previous.foundationalFinopsContracts !== undefined
-              ? {
-                  foundationalFinopsContracts: structuredClone(
-                    previous.foundationalFinopsContracts,
-                  ),
-                }
-              : {}),
-            ...(unchanged && previous.finopsSourceContracts !== undefined
-              ? {
-                  finopsSourceContracts: structuredClone(
-                    previous.finopsSourceContracts,
-                  ),
-                }
-              : {}),
-            ...(unchanged && previous.computeOptimizerExportObjectContracts !== undefined
-              ? {
-                  computeOptimizerExportObjectContracts: structuredClone(
-                    previous.computeOptimizerExportObjectContracts,
-                  ),
-                }
-              : {}),
-            ...(unchanged && previous.computeOptimizerExportLaunchContracts !== undefined
-              ? {
-                  computeOptimizerExportLaunchContracts: structuredClone(
-                    previous.computeOptimizerExportLaunchContracts,
-                  ),
-                }
-              : {}),
-            status: unchanged ? previous.status : "PENDING",
-            permissionPackVersion: unchanged
-              ? previous.permissionPackVersion
-              : LEGACY_PERMISSION_PACK_VERSION,
-            createdAt: previous?.createdAt ?? timestamp,
-            updatedAt: timestamp,
-          },
+          [key]: nextConnection,
         },
         tombstones: document.tombstones,
       };
+    }, async () => {
+      const pending = pendingMaterialization as {
+        readonly scope: ReturnType<typeof staticSecretScope>;
+        readonly credentials: AwsStaticCredentialMaterial;
+        readonly prepared: StaticCredentialSecretReference;
+      } | null;
+      if (pending === null) return;
+      if (this.staticCredentialSecretStore === null) throw new RegistryIntegrityError();
+      await this.staticCredentialSecretStore.stagePrepared(
+        pending.scope,
+        pending.credentials,
+        pending.prepared,
+      );
     });
   }
 
@@ -305,7 +415,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
    */
   public async disable(scope: ConnectionScope, connectionId: string): Promise<void> {
     assertScope(scope, connectionId);
-    await this.mutate((document) => {
+    await this.mutateAsync(async (document) => {
       const key = connectionKey(scope.tenantId, connectionId);
       if (document.tombstones[key] !== undefined) return document;
       const connection = document.connections[key];
@@ -336,7 +446,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
    */
   public async offboard(scope: ConnectionScope, connectionId: string): Promise<void> {
     assertScope(scope, connectionId);
-    await this.mutate((document) => {
+    await this.mutateAsync(async (document) => {
       const key = connectionKey(scope.tenantId, connectionId);
       const existingTombstone = document.tombstones[key];
       if (existingTombstone !== undefined) return document;
@@ -346,6 +456,20 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         (connection.tenantId !== scope.tenantId || connection.connectionId !== connectionId)
       ) {
         throw new RegistryConnectionNotFoundError();
+      }
+      const secretState = connection?.staticCredentialSecretState;
+      const reference = secretState?.active ?? secretState?.staged;
+      if (reference !== undefined) {
+        if (this.staticCredentialSecretStore === null || connection === undefined) {
+          throw new RegistryStateError();
+        }
+        await this.staticCredentialSecretStore.destroy(staticSecretScope(connection), reference);
+      } else if (this.staticCredentialSecretStore !== null
+        && (connection === undefined || connection.credentialKind === "static_credentials")) {
+        await this.staticCredentialSecretStore.destroyOrphan({
+          tenantId: scope.tenantId,
+          connectionId,
+        });
       }
       const connections = { ...document.connections };
       delete connections[key];
@@ -370,7 +494,7 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     verification: OnboardingTrustVerification,
   ): Promise<void> {
     assertScope(scope, connectionId);
-    await this.mutate((document) => {
+    await this.mutateAsync(async (document) => {
       const key = connectionKey(scope.tenantId, connectionId);
       const connection = document.connections[key];
       if (connection === undefined) throw new RegistryConnectionNotFoundError();
@@ -452,17 +576,31 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         verification.connectionId !== connection.connectionId ||
         verification.accountId !== connection.expectedAccountId ||
         verification.partition !== connection.partition ||
-        connection.staticCredentials === undefined ||
-        verification.accessKeyLast4 !== connection.staticCredentials.accessKeyId.slice(-4)
+        (connection.staticCredentialSecretState !== undefined
+          && verification.secretVersionId !== (
+            connection.staticCredentialSecretState.staged?.versionId
+            ?? connection.staticCredentialSecretState.active?.versionId
+          )) ||
+        (connection.staticCredentialSecretState === undefined
+          && verification.secretVersionId !== undefined) ||
+        verification.accessKeyLast4 !== (
+          connection.staticCredentialSecretState?.staged?.accessKeyLast4
+          ?? connection.staticCredentialSecretState?.active?.accessKeyLast4
+          ?? connection.staticCredentials?.accessKeyId.slice(-4)
+        )
       ) {
         throw new RegistryIntegrityError();
       }
+      const secretState = connection.staticCredentialSecretState;
       return {
         version: 3,
         connections: {
           ...document.connections,
           [key]: {
             ...connection,
+            ...(secretState?.staged === undefined
+              ? {}
+              : { staticCredentialSecretState: { ...secretState, stagedVerified: true } }),
             status: connection.status === "ACTIVE" ? "ACTIVE" : "VERIFIED",
             permissionPackVersion: CURRENT_PERMISSION_PACK_VERSION,
             updatedAt: this.now().toISOString(),
@@ -593,9 +731,10 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     scope: ConnectionScope,
     connectionId: string,
     expectedRoleArn: string,
+    expectedSecretVersionId?: string,
   ): Promise<void> {
     assertScope(scope, connectionId);
-    await this.mutate((document) => {
+    await this.mutateAsync(async (document) => {
       const key = connectionKey(scope.tenantId, connectionId);
       const connection = document.connections[key];
       if (connection === undefined) throw new RegistryConnectionNotFoundError();
@@ -606,6 +745,47 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       ) {
         throw new RegistryStateError();
       }
+      const secretState = connection.staticCredentialSecretState;
+      if (connection.credentialKind === "static_credentials" && secretState !== undefined) {
+        if (expectedRoleArn !== "" || this.staticCredentialSecretStore === null) {
+          throw new RegistryStateError();
+        }
+        if (expectedSecretVersionId === undefined
+          || !/^[A-Za-z0-9-]{32,64}$/u.test(expectedSecretVersionId)) {
+          throw new RegistryStateError();
+        }
+        if (secretState.staged === undefined) {
+          if (secretState.active !== undefined && connection.status === "ACTIVE"
+            && connection.permissionPackVersion === CURRENT_PERMISSION_PACK_VERSION
+            && secretState.active.versionId === expectedSecretVersionId) {
+            return document;
+          }
+          throw new RegistryStateError();
+        }
+        if (secretState.staged.versionId !== expectedSecretVersionId) {
+          throw new RegistryStateError();
+        }
+        if (secretState.stagedVerified !== true) throw new RegistryStateError();
+        await this.staticCredentialSecretStore.promote(
+          staticSecretScope(connection),
+          secretState.staged,
+        );
+        return {
+          version: 3,
+          connections: {
+            ...document.connections,
+            [key]: {
+              ...connection,
+              staticCredentialSecretState: { active: secretState.staged },
+              status: "ACTIVE",
+              permissionPackVersion: CURRENT_PERMISSION_PACK_VERSION,
+              updatedAt: this.now().toISOString(),
+            },
+          },
+          tombstones: document.tombstones,
+        };
+      }
+      if (expectedSecretVersionId !== undefined) throw new RegistryStateError();
       if (
         connection.status === "ACTIVE" &&
         connection.permissionPackVersion === CURRENT_PERMISSION_PACK_VERSION
@@ -638,13 +818,67 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
     scope: ConnectionScope,
     connectionId: string,
     expectedRoleArn: string,
+    expectedSecretVersionId?: string,
   ): Promise<void> {
     assertScope(scope, connectionId);
-    await this.mutate((document) => {
+    await this.mutateAsync(async (document) => {
       const key = connectionKey(scope.tenantId, connectionId);
       if (document.tombstones[key] !== undefined) throw new RegistryStateError();
       const connection = document.connections[key];
       if (connection === undefined) return document;
+      const secretState = connection.staticCredentialSecretState;
+      if (connection.credentialKind === "static_credentials" && secretState !== undefined) {
+        if (expectedRoleArn !== "" || this.staticCredentialSecretStore === null) {
+          throw new RegistryStateError();
+        }
+        if (expectedSecretVersionId === undefined
+          || !/^[A-Za-z0-9-]{32,64}$/u.test(expectedSecretVersionId)) {
+          throw new RegistryStateError();
+        }
+        if (secretState.staged === undefined) return document;
+        if (secretState.staged.versionId !== expectedSecretVersionId) {
+          throw new RegistryStateError();
+        }
+        await this.staticCredentialSecretStore.discard(
+          staticSecretScope(connection),
+          secretState.staged,
+          secretState.active,
+        );
+        if (secretState.active !== undefined) {
+          return {
+            version: 3,
+            connections: {
+              ...document.connections,
+              [key]: {
+                ...connection,
+                staticCredentialSecretState: { active: secretState.active },
+                status: "ACTIVE",
+                updatedAt: this.now().toISOString(),
+              },
+            },
+            tombstones: document.tombstones,
+          };
+        }
+        // Retain the opaque reference after a failed initial handoff. No key
+        // material is present and the version has no runnable stage, but the
+        // pointer lets a same-key retry reattach SUTRAPENDING and lets explicit
+        // offboarding schedule recoverable deletion of the exact secret.
+        return {
+          version: 3,
+          connections: {
+            ...document.connections,
+            [key]: {
+              ...connection,
+              staticCredentialSecretState: { staged: secretState.staged },
+              status: "PENDING",
+              permissionPackVersion: LEGACY_PERMISSION_PACK_VERSION,
+              updatedAt: this.now().toISOString(),
+            },
+          },
+          tombstones: document.tombstones,
+        };
+      }
+      if (expectedSecretVersionId !== undefined) throw new RegistryStateError();
       if (
         connection.tenantId !== scope.tenantId ||
         connection.connectionId !== connectionId ||
@@ -662,9 +896,16 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
   private async mutate(
     transform: (document: RegistryDocument) => RegistryDocument,
   ): Promise<void> {
+    return this.mutateAsync(async (document) => transform(document));
+  }
+
+  private async mutateAsync(
+    transform: (document: RegistryDocument) => Promise<RegistryDocument>,
+    afterWrite?: () => Promise<void>,
+  ): Promise<void> {
     const operation = this.writeTail.then(async () => {
       const current = await this.readDocument();
-      const next = transform(current);
+      const next = await transform(current);
       if (
         Object.keys(next.connections).length > MAX_CONNECTIONS ||
         Object.keys(next.tombstones).length > MAX_CONNECTIONS
@@ -672,9 +913,50 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
         throw new RegistryIntegrityError();
       }
       await this.writeDocument(next);
+      await afterWrite?.();
     });
     this.writeTail = operation.catch(() => undefined);
     return operation;
+  }
+
+  private async hydrateStaticCredential(
+    persisted: RegisteredAwsConnection,
+    selection: "active" | "candidate",
+  ): Promise<RegisteredAwsConnection> {
+    const state = persisted.staticCredentialSecretState;
+    if (state === undefined) {
+      if (persisted.credentialKind === "static_credentials"
+        && this.staticCredentialSecretStore !== null) {
+        // A live Secrets Manager deployment never consumes a legacy key from
+        // the encrypted registry file. The customer must re-register through
+        // the reviewed secret-reference path.
+        throw new RegistryIntegrityError();
+      }
+      return structuredClone(persisted);
+    }
+    if (persisted.credentialKind !== "static_credentials"
+      || persisted.staticCredentials !== undefined
+      || this.staticCredentialSecretStore === null) {
+      throw new RegistryIntegrityError();
+    }
+    const activeSelected = state.active !== undefined
+      && (selection === "active" || state.staged === undefined
+        || state.staged.versionId === state.active.versionId);
+    const reference = selection === "candidate"
+      ? state.staged ?? state.active
+      : state.active ?? state.staged;
+    if (reference === undefined) throw new RegistryIntegrityError();
+    const material = await this.staticCredentialSecretStore.read(
+      staticSecretScope(persisted),
+      reference,
+      activeSelected ? "active" : "candidate",
+    );
+    const { staticCredentialSecretState: _reference, ...connection } = persisted;
+    void _reference;
+    return {
+      ...structuredClone(connection),
+      staticCredentials: material,
+    };
   }
 
   private async readDocument(): Promise<RegistryDocument> {
@@ -740,8 +1022,16 @@ export class EncryptedFileConnectionRegistry implements ScopedConnectionRegistry
       await handle.sync();
       await handle.close();
       handle = undefined;
+      this.testOnlyWriteFaultInjector?.("beforeRename");
       await rename(temporaryPath, this.filePath);
+      this.testOnlyWriteFaultInjector?.("afterRename");
       await chmod(this.filePath, 0o600);
+      const directoryHandle = await open(directory, fsConstants.O_RDONLY);
+      try {
+        await directoryHandle.sync();
+      } finally {
+        await directoryHandle.close();
+      }
     } finally {
       if (handle !== undefined) await handle.close().catch(() => undefined);
       await rm(temporaryPath, { force: true }).catch(() => undefined);
@@ -873,11 +1163,33 @@ export function parseConnectionInput(input: RegisterAwsConnectionInput): Registe
 /**
  * Static-credential records carry no role trust material: roleArn and
  * externalId are pinned to empty strings so no AssumeRole path can ever
- * resolve them, and no role contract may be attached. ASIA (temporary) keys
- * require their session token; AKIA (long-term) keys must not carry one.
+ * resolve them, and no role contract may be attached. Only a dedicated IAM
+ * user's long-lived AKIA credential is accepted.
  */
 function parseStaticCredentialConnectionInput(
   input: RegisterAwsConnectionInput,
+): RegisteredAwsConnection {
+  const metadata = parseStaticCredentialConnectionMetadata(input);
+  const credentials = input.staticCredentials;
+  if (
+    credentials === undefined ||
+    !STATIC_ACCESS_KEY_ID.test(credentials.accessKeyId) ||
+    !STATIC_SECRET_ACCESS_KEY.test(credentials.secretAccessKey) ||
+    credentials.sessionToken !== undefined
+  ) {
+    throw new RegistryIntegrityError();
+  }
+  return {
+    ...metadata,
+    staticCredentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+    },
+  };
+}
+
+function parseStaticCredentialConnectionMetadata(
+  input: Omit<RegisterAwsConnectionInput, "staticCredentials">,
 ): RegisteredAwsConnection {
   if (
     input.roleArn !== "" ||
@@ -888,22 +1200,8 @@ function parseStaticCredentialConnectionInput(
   ) {
     throw new RegistryIntegrityError();
   }
-  const credentials = input.staticCredentials;
-  if (
-    credentials === undefined ||
-    !STATIC_ACCESS_KEY_ID.test(credentials.accessKeyId) ||
-    !STATIC_SECRET_ACCESS_KEY.test(credentials.secretAccessKey)
-  ) {
-    throw new RegistryIntegrityError();
-  }
-  if (credentials.accessKeyId.startsWith("ASIA")) {
-    if (
-      credentials.sessionToken === undefined ||
-      !STATIC_SESSION_TOKEN.test(credentials.sessionToken)
-    ) {
-      throw new RegistryIntegrityError();
-    }
-  } else if (credentials.sessionToken !== undefined) {
+  if (!IDENTIFIER.test(input.tenantId) || !IDENTIFIER.test(input.connectionId)
+    || !ACCOUNT_ID.test(input.expectedAccountId) || !PARTITIONS.has(input.partition)) {
     throw new RegistryIntegrityError();
   }
   if (!isValidAwsRegionSelection(input.enabledRegions, input.partition)) {
@@ -923,13 +1221,6 @@ function parseStaticCredentialConnectionInput(
     permissionPackVersion: LEGACY_PERMISSION_PACK_VERSION,
     sessionNamePrefix: prefix,
     credentialKind: "static_credentials",
-    staticCredentials: {
-      accessKeyId: credentials.accessKeyId,
-      secretAccessKey: credentials.secretAccessKey,
-      ...(credentials.sessionToken === undefined
-        ? {}
-        : { sessionToken: credentials.sessionToken }),
-    },
     enabledRegions: [...input.enabledRegions],
     createdAt: timestamp,
     updatedAt: timestamp,
@@ -1039,7 +1330,12 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
         : legacyKeys;
   const optionalContractKeys = [
     ...(Object.hasOwn(value, "credentialKind")
-      ? ["credentialKind", "staticCredentials"]
+      ? [
+          "credentialKind",
+          Object.hasOwn(value, "staticCredentialSecretState")
+            ? "staticCredentialSecretState"
+            : "staticCredentials",
+        ]
       : []),
     ...(Object.hasOwn(value, "foundationalFinopsContracts")
       ? ["foundationalFinopsContracts"]
@@ -1071,7 +1367,7 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
   ) {
     throw new RegistryIntegrityError();
   }
-  const parsed = parseConnectionInput({
+  const persistedInput = {
     tenantId: record.tenantId,
     connectionId: record.connectionId,
     expectedAccountId: record.expectedAccountId,
@@ -1087,13 +1383,24 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
           expectedRolePath: record.expectedRolePath as string,
           expectedRoleName: record.expectedRoleName as string,
         }),
-    ...(record.credentialKind === undefined
-      ? {}
-      : {
-          credentialKind: record.credentialKind as AwsConnectionCredentialKind,
-          staticCredentials: parsePersistedStaticCredentials(record.staticCredentials),
-        }),
-  });
+    ...(record.credentialKind === undefined ? {} : {
+      credentialKind: record.credentialKind as AwsConnectionCredentialKind,
+    }),
+  };
+  const parsed = record.credentialKind === "static_credentials"
+      && Object.hasOwn(record, "staticCredentialSecretState")
+    ? {
+        ...parseStaticCredentialConnectionMetadata(persistedInput),
+        staticCredentialSecretState: parseStaticCredentialSecretState(
+          record.staticCredentialSecretState,
+        ),
+      }
+    : parseConnectionInput({
+        ...persistedInput,
+        ...(record.credentialKind === undefined
+          ? {}
+          : { staticCredentials: parsePersistedStaticCredentials(record.staticCredentials) }),
+      });
   if (
     record.status !== "PENDING" &&
     record.status !== "VERIFIED" &&
@@ -1102,6 +1409,18 @@ export function parsePersistedConnection(value: Record<string, unknown>): Regist
     record.status !== "DISABLED"
   ) {
     throw new RegistryIntegrityError();
+  }
+  if (parsed.staticCredentialSecretState !== undefined) {
+    const requiresActiveReference = record.status === "ACTIVE"
+      || record.status === "DEGRADED"
+      || record.status === "DISABLED";
+    if (requiresActiveReference && parsed.staticCredentialSecretState.active === undefined) {
+      throw new RegistryIntegrityError();
+    }
+    if (!requiresActiveReference
+      && parsed.staticCredentialSecretState.active !== undefined) {
+      throw new RegistryIntegrityError();
+    }
   }
   if (!validIsoDate(record.createdAt) || !validIsoDate(record.updatedAt)) {
     throw new RegistryIntegrityError();
@@ -1288,21 +1607,63 @@ function validIsoDate(value: unknown): value is string {
  */
 function parsePersistedStaticCredentials(value: unknown): AwsStaticCredentialMaterial {
   if (!isRecord(value)) throw new RegistryIntegrityError();
-  const keys = Object.hasOwn(value, "sessionToken")
-    ? ["accessKeyId", "secretAccessKey", "sessionToken"]
-    : ["accessKeyId", "secretAccessKey"];
-  const record = exactRecord(value, keys);
+  const record = exactRecord(value, ["accessKeyId", "secretAccessKey"]);
   if (
     typeof record.accessKeyId !== "string" ||
     typeof record.secretAccessKey !== "string" ||
-    (Object.hasOwn(record, "sessionToken") && typeof record.sessionToken !== "string")
+    !STATIC_ACCESS_KEY_ID.test(record.accessKeyId) ||
+    !STATIC_SECRET_ACCESS_KEY.test(record.secretAccessKey)
   ) {
     throw new RegistryIntegrityError();
   }
   return {
     accessKeyId: record.accessKeyId,
     secretAccessKey: record.secretAccessKey,
-    ...(typeof record.sessionToken === "string" ? { sessionToken: record.sessionToken } : {}),
+  };
+}
+
+function parseStaticCredentialSecretState(value: unknown): StaticCredentialSecretState {
+  if (!isRecord(value)) throw new RegistryIntegrityError();
+  const keys = [
+    ...(Object.hasOwn(value, "active") ? ["active"] : []),
+    ...(Object.hasOwn(value, "staged") ? ["staged"] : []),
+    ...(Object.hasOwn(value, "stagedVerified") ? ["stagedVerified"] : []),
+  ];
+  const record = exactRecord(value, keys);
+  const active = Object.hasOwn(record, "active")
+    ? parseStaticCredentialSecretReference(record.active)
+    : undefined;
+  const staged = Object.hasOwn(record, "staged")
+    ? parseStaticCredentialSecretReference(record.staged)
+    : undefined;
+  if (active === undefined && staged === undefined) throw new RegistryIntegrityError();
+  if (active !== undefined && staged !== undefined && active.secretArn !== staged.secretArn) {
+    throw new RegistryIntegrityError();
+  }
+  if (Object.hasOwn(record, "stagedVerified")
+    && (record.stagedVerified !== true || staged === undefined)) {
+    throw new RegistryIntegrityError();
+  }
+  return {
+    ...(active === undefined ? {} : { active }),
+    ...(staged === undefined ? {} : { staged }),
+    ...(record.stagedVerified === true ? { stagedVerified: true } : {}),
+  };
+}
+
+function parseStaticCredentialSecretReference(value: unknown): StaticCredentialSecretReference {
+  const record = exactRecord(value, ["secretArn", "versionId", "accessKeyLast4"]);
+  if (typeof record.secretArn !== "string"
+    || !/^arn:aws:secretsmanager:[a-z0-9-]{1,32}:\d{12}:secret:sutra\/customer-aws-credentials\/v1\/[a-f0-9]{64}\/[a-f0-9]{64}-[A-Za-z0-9]{6}$/u
+      .test(record.secretArn)
+    || typeof record.versionId !== "string" || !/^[A-Za-z0-9-]{32,64}$/u.test(record.versionId)
+    || typeof record.accessKeyLast4 !== "string" || !/^[A-Z0-9]{4}$/u.test(record.accessKeyLast4)) {
+    throw new RegistryIntegrityError();
+  }
+  return {
+    secretArn: record.secretArn,
+    versionId: record.versionId,
+    accessKeyLast4: record.accessKeyLast4,
   };
 }
 
@@ -1313,9 +1674,18 @@ function staticCredentialsEqual(
   if (left === undefined || right === undefined) return left === right;
   return (
     left.accessKeyId === right.accessKeyId &&
-    secretsEqual(left.secretAccessKey, right.secretAccessKey) &&
-    secretsEqual(left.sessionToken ?? "", right.sessionToken ?? "")
+    secretsEqual(left.secretAccessKey, right.secretAccessKey)
   );
+}
+
+function staticSecretScope(connection: Pick<RegisteredAwsConnection,
+  "tenantId" | "connectionId" | "expectedAccountId" | "partition">) {
+  return {
+    tenantId: connection.tenantId,
+    connectionId: connection.connectionId,
+    expectedAccountId: connection.expectedAccountId,
+    partition: connection.partition,
+  } as const;
 }
 
 function arraysEqual(left: readonly string[], right: readonly string[]): boolean {

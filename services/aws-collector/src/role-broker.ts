@@ -451,9 +451,8 @@ interface ResolvedStaticConnection {
   readonly partition: AwsPartition;
 }
 
-const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/;
+const STATIC_ACCESS_KEY_ID = /^AKIA[A-Z0-9]{16}$/;
 const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/;
-const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
 
 export interface AwsRoleBrokerDependencies {
   readonly registry: ScopedConnectionRegistry;
@@ -1671,6 +1670,29 @@ export class AwsRoleBroker {
       // A trust-role connection can never be verified through the static path.
       throw new ConnectionStateError();
     }
+    const session = await this.staticCredentialSession(resolved, jobId);
+    return {
+      connectionId: resolved.connection.connectionId,
+      accountId: resolved.connection.expectedAccountId,
+      partition: resolved.partition,
+      callerIdentityArn: session.callerIdentityArn,
+      accessKeyLast4: resolved.credentials.accessKeyId.slice(-4),
+    };
+  }
+
+  /** Verify the exact staged candidate supplied by the collector registry. */
+  public async verifyStaticCredentialCandidate(
+    scope: ConnectionScope,
+    candidate: StoredAwsConnection,
+    jobId: string,
+  ): Promise<StaticCredentialVerification> {
+    const resolved = await this.resolveStaticConnection(
+      scope,
+      candidate.connectionId,
+      ["PENDING", "VERIFIED", "DEGRADED", "ACTIVE"],
+      candidate,
+    );
+    if (resolved === null) throw new ConnectionStateError();
     const session = await this.staticCredentialSession(resolved, jobId);
     return {
       connectionId: resolved.connection.connectionId,
@@ -3378,11 +3400,13 @@ export class AwsRoleBroker {
     scope: ConnectionScope,
     connectionId: string,
     allowedStatuses: readonly AwsConnectionStatus[],
+    candidate?: StoredAwsConnection,
   ): Promise<ResolvedStaticConnection | null> {
     if (scope.tenantId.length === 0 || connectionId.length === 0) {
       throw new ConnectionNotFoundError();
     }
-    const connection = await this.dependencies.registry.resolve(scope, connectionId);
+    const connection = candidate
+      ?? await this.dependencies.registry.resolve(scope, connectionId);
     if (connection === null) {
       throw new ConnectionNotFoundError();
     }
@@ -3415,9 +3439,7 @@ export class AwsRoleBroker {
       credentials === undefined ||
       !STATIC_ACCESS_KEY_ID.test(credentials.accessKeyId) ||
       !STATIC_SECRET_ACCESS_KEY.test(credentials.secretAccessKey) ||
-      credentials.accessKeyId.startsWith("ASIA") !== (credentials.sessionToken !== undefined) ||
-      (credentials.sessionToken !== undefined &&
-        !STATIC_SESSION_TOKEN.test(credentials.sessionToken))
+      credentials.sessionToken !== undefined
     ) {
       throw new ConnectionIntegrityError("Stored static credential material is invalid");
     }
@@ -3443,7 +3465,7 @@ export class AwsRoleBroker {
     const credentials = {
       accessKeyId: resolved.credentials.accessKeyId,
       secretAccessKey: resolved.credentials.secretAccessKey,
-      sessionToken: resolved.credentials.sessionToken ?? "",
+      sessionToken: "",
       expiration: new Date(this.now().getTime() + 900_000),
     };
     const identityClient = this.dependencies.callerIdentityClientFactory(credentials);
@@ -3454,10 +3476,14 @@ export class AwsRoleBroker {
       throw new CallerIdentityFailedError(errorName(error));
     }
     const callerIdentityArn = identity.Arn;
+    const dedicatedUserArn = new RegExp(
+      `^arn:${resolved.partition}:iam::${resolved.connection.expectedAccountId}:user\/[A-Za-z0-9_+=,.@\/-]{1,512}$`,
+      "u",
+    );
     if (
       identity.Account !== resolved.connection.expectedAccountId ||
       callerIdentityArn === undefined ||
-      callerIdentityArn.split(":")[1] !== resolved.partition
+      !dedicatedUserArn.test(callerIdentityArn)
     ) {
       throw new IdentityMismatchError();
     }

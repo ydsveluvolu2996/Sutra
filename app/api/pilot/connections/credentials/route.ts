@@ -1,6 +1,8 @@
 import {
+  activateVerifiedConnectionCredentials,
   commitVerifiedConnectionCredentials,
   getStoredConnectionSecretForOrg,
+  markConnectionNeedsAttention,
 } from "../../../../../db/pilot-repository";
 import {
   assertSameOrigin,
@@ -15,6 +17,7 @@ import {
   jsonResponse,
   registerCollectorStaticCredentialConnection,
   requirePilotActor,
+  safeValidationFailureCode,
   verifyCollectorCredentialConnection,
 } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
@@ -23,15 +26,26 @@ import { stageVerifyThenCommitRole } from "../../../../../lib/local-aws-lifecycl
 import { JobQueueRepository } from "../../../../../db/job-queue-repository";
 import { enqueueTenantCollectionJob } from "../../../../../lib/hosted-collector-job";
 import { assertAwsStaticCredentialsOnboardingEnabled } from "../../../../../lib/aws-static-credentials-feature";
+import type { AwsStaticCredentialSecretReference } from "../../../../../lib/pilot-boundary";
 
 export const dynamic = "force-dynamic";
 
-async function onboardingCollectionOperationId(connectionId: string, accessKeyLast4: string): Promise<string> {
+async function onboardingCollectionOperationId(connectionId: string, versionId: string): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(`${connectionId}\u0000${accessKeyLast4}`),
+    new TextEncoder().encode(`${connectionId}\u0000${versionId}`),
   ));
   return `creds_${[...digest].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function requireStagedSecretReference(
+  holder: { readonly value: AwsStaticCredentialSecretReference | null },
+): AwsStaticCredentialSecretReference {
+  if (holder.value !== null) return holder.value;
+  throw Object.assign(
+    new Error("The collector did not return the staged credential reference"),
+    { code: "BROKER_RESPONSE_INVALID" },
+  );
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -43,7 +57,6 @@ export async function POST(request: Request): Promise<Response> {
     // They are forwarded once to the collector broker and are never persisted,
     // logged, echoed into a response, or included in any error or audit event.
     const body = parseAwsStaticCredentialsSubmission(await readBoundedJson(request));
-    const accessKeyLast4 = body.accessKeyId.slice(-4);
     const stored = await getStoredConnectionSecretForOrg(actor.orgId, body.connectionId);
     assertSessionCapability(actor.authenticated, "connection:manage", stored.customerId);
     return await withLocalOnboardingAccountLock(
@@ -71,21 +84,34 @@ export async function POST(request: Request): Promise<Response> {
           );
         }
         const health = await getCollectorHealth(current.partition);
-        if (health.mode !== "live") {
+        if (health.mode !== "live" || !health.staticCredentials.ready) {
           throw Object.assign(new Error("AWS credential registration requires an explicitly enabled live collector"), { code: "INVALID_STATE" });
         }
-        const registerCredentialsWithCollector = () => registerCollectorStaticCredentialConnection({
-          tenantId: actor.orgId,
-          connectionId: current.connectionId,
-          accountId: current.accountId,
-          partition: current.partition,
-          enabledRegions: current.enabledRegions,
-          staticCredentials: {
-            accessKeyId: body.accessKeyId,
-            secretAccessKey: body.secretAccessKey,
-            sessionToken: body.sessionToken,
-          },
-        });
+        const stagedSecretReference: { value: AwsStaticCredentialSecretReference | null } = {
+          value: null,
+        };
+        const registerCredentialsWithCollector = async () => {
+          const registration = await registerCollectorStaticCredentialConnection({
+            tenantId: actor.orgId,
+            connectionId: current.connectionId,
+            accountId: current.accountId,
+            partition: current.partition,
+            enabledRegions: current.enabledRegions,
+            staticCredentials: {
+              accessKeyId: body.accessKeyId,
+              secretAccessKey: body.secretAccessKey,
+            },
+          });
+          stagedSecretReference.value = registration.secretReference;
+          if (health.sourceAccountId === null
+            || registration.secretReference.secretArn.split(":")[4] !== health.sourceAccountId) {
+            throw Object.assign(
+              new Error("The collector returned a credential reference outside its workload account"),
+              { code: "BROKER_RESPONSE_INVALID" },
+            );
+          }
+          return registration;
+        };
         const verifyCredentialsWithCollector = () => verifyCollectorCredentialConnection({
           tenantId: actor.orgId,
           connectionId: current.connectionId,
@@ -96,16 +122,25 @@ export async function POST(request: Request): Promise<Response> {
         const result = await stageVerifyThenCommitRole({
           stageCollector: registerCredentialsWithCollector,
           verifyCollector: verifyCredentialsWithCollector,
-          commitVerifiedControlPlaneRole: (verification) => commitVerifiedConnectionCredentials({
-            orgId: actor.orgId,
-            connectionId: current.connectionId,
-            actorId: actor.id,
-            verification,
-          }),
+          commitVerifiedControlPlaneRole: (verification) =>
+            commitVerifiedConnectionCredentials({
+              orgId: actor.orgId,
+              connectionId: current.connectionId,
+              actorId: actor.id,
+              verification,
+              secretReference: requireStagedSecretReference(stagedSecretReference),
+            }),
           activateCollector: () => activateCollectorConnection({
             tenantId: actor.orgId,
             connectionId: current.connectionId,
             roleArn: "",
+            secretVersionId: requireStagedSecretReference(stagedSecretReference).versionId,
+          }),
+          finalizeControlPlaneActivation: () => activateVerifiedConnectionCredentials({
+            orgId: actor.orgId,
+            connectionId: current.connectionId,
+            actorId: actor.id,
+            secretReference: requireStagedSecretReference(stagedSecretReference),
           }),
           compensateStagedCollector: async () => {
             // v1 compensation deliberately only discards the staged candidate.
@@ -119,8 +154,15 @@ export async function POST(request: Request): Promise<Response> {
               tenantId: actor.orgId,
               connectionId: current.connectionId,
               roleArn: "",
+              secretVersionId: requireStagedSecretReference(stagedSecretReference).versionId,
             });
           },
+          onActivationFailure: (error) => markConnectionNeedsAttention(
+            current.connectionId,
+            actor.id,
+            safeValidationFailureCode(error),
+            actor.orgId,
+          ),
         });
         // Credential activation is only the trust handoff. The first real
         // inventory is scheduled durably and drained by the private production
@@ -131,7 +173,10 @@ export async function POST(request: Request): Promise<Response> {
           orgId: actor.orgId,
           customerId: current.customerId,
           connectionId: current.connectionId,
-          operationId: await onboardingCollectionOperationId(current.connectionId, accessKeyLast4),
+          operationId: await onboardingCollectionOperationId(
+            current.connectionId,
+            requireStagedSecretReference(stagedSecretReference).versionId,
+          ),
         });
         return jsonResponse({
           connection: result.connection,

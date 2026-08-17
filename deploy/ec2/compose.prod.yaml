@@ -108,8 +108,14 @@ services:
       # The deployment boundary selects only the switch matching identity mode;
       # neither switch can enable the other adapter.
       SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true"
-      # Fail closed: the reviewed Secrets Manager reference-only backend is not deployed.
-      SUTRA_AWS_STATIC_KEYS_ENABLED: "false"
+      # The application stores only non-secret references; the embedded live
+      # collector resolves version-bound credentials from the host account's
+      # path-scoped Secrets Manager namespace at execution time.
+      # Emergency kill switch: infrastructure is installed first, then the
+      # ignored host runtime file opts in with the exact string "true". A
+      # missing value always fails closed and can disable onboarding without
+      # rolling an older, registry-incompatible image back into service.
+      SUTRA_AWS_STATIC_KEYS_ENABLED: "${SUTRA_AWS_STATIC_KEYS_ENABLED:-false}"
       # Self-serve signup: a verified Google identity with no membership creates
       # its own trial organization. Off unless explicitly enabled in .env.ec2 --
       # the value comes only from that managed file, never from ambient host

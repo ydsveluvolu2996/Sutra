@@ -7,7 +7,7 @@ import LegalShell from "../components/legal-shell";
 export const metadata: Metadata = publicPageMetadata({
   path: "/privacy",
   title: "Privacy Policy",
-  description: "How Sutra collects, uses and protects data — data-minimizing by design, with read-only-by-default, customer-owned AWS access and no stored access keys.",
+  description: "How Sutra collects, uses and protects data — including customer-owned IAM role access and the optional AWS Secrets Manager-backed access-key method.",
 });
 
 export default function PrivacyPage() {
@@ -15,8 +15,8 @@ export default function PrivacyPage() {
     <LegalShell
       kicker="Privacy Policy"
       title={<>Privacy, <span className="accent">by design.</span></>}
-      updated="Last updated: 21 July 2026"
-      lead="Sutra is a business-to-business cloud-operations platform for managed service providers. We collect the least data needed to run the service, we never store your AWS access keys, and every finding we produce is derived from metadata you explicitly authorize us to observe through a read-only-by-default, customer-owned role."
+      updated="Last updated: 17 August 2026"
+      lead="Sutra is a business-to-business cloud-operations platform for managed service providers. We collect the least data needed to run the service. Our recommended AWS connection uses a customer-owned IAM role and stores no access key; the optional access-key method stores customer-supplied credentials encrypted in AWS Secrets Manager."
     >
       <p className="lx-legal-note">
         <em>
@@ -35,12 +35,13 @@ export default function PrivacyPage() {
             to secure access.
           </li>
           <li>
-            <b>Read-only AWS metadata.</b> Configuration and posture metadata about your AWS and Amazon EKS
-            environments, gathered through a customer-owned IAM role that grants only read, metadata-scoped
-            permissions. A separate collector workload assumes that role with temporary STS credentials.{" "}
-            <b>We do not store customer access keys</b>, and long-lived credentials never enter the browser or
-            the web control plane. We collect resource inventory, relationships and evidence — not the contents
-            of your workloads or data stores.
+            <b>AWS connection data and read-only metadata.</b> Configuration and posture metadata about your AWS
+            and Amazon EKS environments. The recommended connection uses a customer-owned IAM role with
+            temporary STS credentials and stores no customer access key. If you choose the optional Access &amp;
+            Secret Keys method, the authenticated onboarding form sends the credential once to the collector,
+            which stores it encrypted in a versioned AWS Secrets Manager secret; the web control plane persists
+            only a non-secret reference and the access-key identifier&apos;s last four characters. We collect resource
+            inventory, relationships and evidence — not the contents of your workloads or data stores.
           </li>
           <li>
             <b>Agentless disk scan results — only if you enable it.</b> Agentless disk scanning is off unless you
@@ -119,15 +120,22 @@ export default function PrivacyPage() {
           closed, associated data is deleted or anonymized within a reasonable period, except where retention is
           required by law.
         </p>
+        <p>
+          For an optional access-key connection, disabling blocks live use but retains the encrypted secret.
+          Offboarding schedules that AWS Secrets Manager secret for deletion after a seven-day recovery window;
+          it does not revoke the separate IAM access key in the customer&apos;s AWS account.
+        </p>
       </section>
 
       <section className="lx-legal-section">
         <h2>7. Security</h2>
         <p>
-          Access is read-only by default and customer-owned, scoped with a unique platform-generated ExternalId, and
-          validated with positive and negative trust checks. Tenant data is isolated so each customer sees only
-          the workspaces explicitly granted to them. See our <a href="/security">Security</a> page for the full
-          model.
+          The recommended role method is read-only by default and customer-owned, scoped with a unique
+          platform-generated ExternalId, and validated with positive and negative trust checks. The optional
+          access-key method verifies account identity with GetCallerIdentity; that check does not prove least
+          privilege, which remains determined by customer-managed IAM policies. Tenant data is isolated so each
+          customer sees only the workspaces explicitly granted to them. See our <a href="/security">Security</a>
+          page for the full model.
         </p>
       </section>
 
