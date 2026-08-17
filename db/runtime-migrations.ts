@@ -130,6 +130,7 @@ import staticCredentialConnectionsSchemaSql from "../drizzle/0130_static_credent
 import awsOrgScopeAndConnectionAddonsSchemaSql from "../drizzle/0131_aws_org_scope_and_connection_addons.sql?raw";
 import organizationPlanSchemaSql from "../drizzle/0132_organization_plan.sql?raw";
 import organizationOnboardingSchemaSql from "../drizzle/0133_organization_onboarding.sql?raw";
+import awsStaticCredentialReferencesSchemaSql from "../drizzle/0134_aws_static_credential_references.sql?raw";
 import { isPostgresDatabase } from "./postgres-d1-adapter";
 import { ensurePostgresRuntimeSchema, resetPostgresRuntimeSchemaCacheForTests } from "./postgres-runtime-migrations";
 
@@ -277,6 +278,7 @@ const migrations = [
   { id: "0131_aws_org_scope_and_connection_addons", statements: statementsFrom(awsOrgScopeAndConnectionAddonsSchemaSql) },
   { id: "0132_organization_plan", statements: statementsFrom(organizationPlanSchemaSql) },
   { id: "0133_organization_onboarding", statements: statementsFrom(organizationOnboardingSchemaSql) },
+  { id: "0134_aws_static_credential_references", statements: statementsFrom(awsStaticCredentialReferencesSchemaSql) },
 ] as const;
 
 const ADD_COLUMN = /^ALTER TABLE `([A-Za-z0-9_]+)` ADD `([A-Za-z0-9_]+)`\s/iu;

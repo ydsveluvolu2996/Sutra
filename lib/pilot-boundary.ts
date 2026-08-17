@@ -322,7 +322,9 @@ export async function parsePilotSnapshot(
 }
 
 export function parseCollectorHealth(value: unknown, expectedPartition?: AwsPartition): CollectorHealth {
-  const record = exactRecord(value, ["ok", "mode", "version", "principalArn", "sourceAccountId", "message"]);
+  const record = exactRecord(value, [
+    "ok", "mode", "version", "principalArn", "sourceAccountId", "staticCredentials", "message",
+  ]);
   if (typeof record.ok !== "boolean" || (record.mode !== "fixture" && record.mode !== "live")) invalid();
   const principalArn = record.principalArn === null ? null : string(record.principalArn, 620);
   const sourceAccountId = record.sourceAccountId === null ? null : awsAccountId(record.sourceAccountId);
@@ -336,12 +338,20 @@ export function parseCollectorHealth(value: unknown, expectedPartition?: AwsPart
     }
     if (parsed.accountId !== sourceAccountId || (expectedPartition !== undefined && parsed.partition !== expectedPartition)) invalid();
   }
+  const staticCredentials = exactRecord(record.staticCredentials, ["backend", "ready"]);
+  if (staticCredentials.backend !== "aws-secrets-manager-reference-v1"
+    || typeof staticCredentials.ready !== "boolean"
+    || (record.mode === "fixture" && staticCredentials.ready)) invalid();
   return {
     ok: record.ok,
     mode: record.mode,
     version: string(record.version, 32, IDENTIFIER),
     principalArn,
     sourceAccountId,
+    staticCredentials: {
+      backend: "aws-secrets-manager-reference-v1",
+      ready: staticCredentials.ready,
+    },
     message: string(record.message, 240),
   };
 }
@@ -350,6 +360,33 @@ export function parseRegisteredResponse(value: unknown): { readonly registered: 
   const record = exactRecord(value, ["registered"]);
   if (record.registered !== true) invalid();
   return { registered: true };
+}
+
+export interface AwsStaticCredentialSecretReference {
+  readonly secretArn: string;
+  readonly versionId: string;
+  readonly accessKeyLast4: string;
+}
+
+export function parseStaticRegisteredResponse(value: unknown): {
+  readonly registered: true;
+  readonly secretReference: AwsStaticCredentialSecretReference;
+} {
+  const record = exactRecord(value, ["registered", "secretReference"]);
+  if (record.registered !== true) invalid();
+  const reference = exactRecord(record.secretReference, [
+    "secretArn", "versionId", "accessKeyLast4",
+  ]);
+  const secretArn = string(reference.secretArn, 2_048);
+  const versionId = string(reference.versionId, 64);
+  const accessKeyLast4 = string(reference.accessKeyLast4, 4);
+  if (!/^arn:aws:secretsmanager:[a-z0-9-]{1,32}:\d{12}:secret:sutra\/customer-aws-credentials\/v1\/[a-f0-9]{64}\/[a-f0-9]{64}-[A-Za-z0-9]{6}$/u.test(secretArn)
+    || !/^[A-Za-z0-9-]{32,64}$/u.test(versionId)
+    || !/^[A-Z0-9]{4}$/u.test(accessKeyLast4)) invalid();
+  return {
+    registered: true,
+    secretReference: { secretArn, versionId, accessKeyLast4 },
+  };
 }
 
 export function parseVerificationResponse(
@@ -458,20 +495,23 @@ export function parseStaticCredentialVerificationResponse(
   readonly partition: AwsPartition;
   readonly callerIdentityArn: string;
   readonly accessKeyLast4: string;
+  readonly secretVersionId: string;
 } {
   const record = exactRecord(value, [
     "verified", "credentialKind", "accountId", "partition", "callerIdentityArn", "accessKeyLast4",
+    "secretVersionId",
   ]);
   if (record.verified !== true || record.credentialKind !== "static_credentials") invalid();
   const accountId = awsAccountId(record.accountId);
   const partition = awsPartition(record.partition);
   const callerIdentityArn = string(record.callerIdentityArn, 2_048);
   const accessKeyLast4 = string(record.accessKeyLast4, 4, /^[A-Z0-9]{4}$/u);
+  const secretVersionId = string(record.secretVersionId, 64, /^[A-Za-z0-9-]{32,64}$/u);
   if (
     accountId !== expected.accountId ||
     partition !== expected.partition ||
     !new RegExp(
-      `^arn:${partition}:(?:iam|sts)::${accountId}:[A-Za-z0-9_+=,.@/-]{1,512}$`,
+      `^arn:${partition}:iam::${accountId}:user/[A-Za-z0-9_+=,.@/-]{1,512}$`,
       "u",
     ).test(callerIdentityArn)
   ) invalid();
@@ -482,5 +522,6 @@ export function parseStaticCredentialVerificationResponse(
     partition,
     callerIdentityArn,
     accessKeyLast4,
+    secretVersionId,
   };
 }

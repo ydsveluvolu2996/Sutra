@@ -127,6 +127,7 @@ import postgresHostedCredentialEnvelopeSql from "../postgres/migrations/0127_hos
 import postgresAwsOrgScopeAndConnectionAddonsSql from "../postgres/migrations/0128_aws_org_scope_and_connection_addons.sql?raw";
 import postgresOrganizationPlanSql from "../postgres/migrations/0129_organization_plan.sql?raw";
 import postgresOrganizationOnboardingSql from "../postgres/migrations/0130_organization_onboarding.sql?raw";
+import postgresAwsStaticCredentialReferencesSql from "../postgres/migrations/0131_aws_static_credential_references.sql?raw";
 
 const migrations = [
   { id: "0000_sutra_baseline", source: postgresBaselineSql },
@@ -258,6 +259,7 @@ const migrations = [
   { id: "0128_aws_org_scope_and_connection_addons", source: postgresAwsOrgScopeAndConnectionAddonsSql },
   { id: "0129_organization_plan", source: postgresOrganizationPlanSql },
   { id: "0130_organization_onboarding", source: postgresOrganizationOnboardingSql },
+  { id: "0131_aws_static_credential_references", source: postgresAwsStaticCredentialReferencesSql },
 ] as const;
 
 let schemaReady: Promise<void> | undefined;

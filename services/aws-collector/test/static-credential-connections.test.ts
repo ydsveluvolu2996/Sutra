@@ -131,7 +131,7 @@ test("static credential registration validation fails closed", async () => {
         sessionToken: SESSION_TOKEN,
       },
     }),
-    // A temporary ASIA key is unusable without its session token.
+    // Temporary ASIA credentials are not a durable onboarding method.
     staticRegistration({
       staticCredentials: {
         accessKeyId: TEMPORARY_ACCESS_KEY_ID,
@@ -171,16 +171,16 @@ test("static credential registration validation fails closed", async () => {
     RegistryIntegrityError,
   );
 
-  // An ASIA key with its token is accepted.
-  await registry.upsert(staticRegistration({
-    staticCredentials: {
-      accessKeyId: TEMPORARY_ACCESS_KEY_ID,
-      secretAccessKey: SECRET_ACCESS_KEY,
-      sessionToken: SESSION_TOKEN,
-    },
-  }));
-  const stored = await registry.resolve(SCOPE, CONNECTION_ID);
-  assert.equal(stored?.staticCredentials?.sessionToken, SESSION_TOKEN);
+  await assert.rejects(
+    registry.upsert(staticRegistration({
+      staticCredentials: {
+        accessKeyId: TEMPORARY_ACCESS_KEY_ID,
+        secretAccessKey: SECRET_ACCESS_KEY,
+        sessionToken: SESSION_TOKEN,
+      },
+    })),
+    RegistryIntegrityError,
+  );
 });
 
 class MemoryRegistry {
@@ -288,6 +288,22 @@ test("static credential verification rejects a wrong-account identity", async ()
     broker.verifyStaticCredentialIdentity(SCOPE, CONNECTION_ID, "verify-static-02"),
     IdentityMismatchError,
   );
+});
+
+test("static credential verification rejects root and assumed-role principals", async () => {
+  for (const identityArn of [
+    "arn:aws:iam::123456789012:root",
+    "arn:aws:sts::123456789012:assumed-role/Administrator/session",
+  ]) {
+    const { broker } = staticBroker({
+      stored: staticStored({ status: "PENDING" }),
+      identityArn,
+    });
+    await assert.rejects(
+      broker.verifyStaticCredentialIdentity(SCOPE, CONNECTION_ID, "verify-static-principal"),
+      IdentityMismatchError,
+    );
+  }
 });
 
 test("a static session re-validates identity, caps expiry at 900s and never assumes a role", async () => {

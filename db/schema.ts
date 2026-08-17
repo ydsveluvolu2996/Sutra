@@ -245,6 +245,12 @@ export const awsConnections = sqliteTable("aws_connections", {
   roleArn: text("role_arn").notNull(),
   externalIdCiphertext: text("external_id_ciphertext").notNull(),
   externalIdKeyVersion: text("external_id_key_version").notNull(),
+  // Opaque, non-secret pointer to the collector-owned Secrets Manager value.
+  // The migration enforces that these three nullable fields are all present
+  // together or all absent; customer key material is never stored here.
+  credentialSecretArn: text("credential_secret_arn"),
+  credentialSecretVersionId: text("credential_secret_version_id"),
+  credentialAccessKeyLast4: text("credential_access_key_last4"),
   permissionPackVersion: text("permission_pack_version").notNull(),
   roleProvisioningMode: text("role_provisioning_mode", { enum: ["sutra_template", "customer_managed"] }).notNull().default("sutra_template"),
   expectedRolePath: text("expected_role_path").notNull().default("/sutra/"),

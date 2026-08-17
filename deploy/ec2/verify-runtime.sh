@@ -84,6 +84,7 @@ grep -Eq '^[[:space:]]*SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true"$' deploy/ec2/
 grep -Eq '^[[:space:]]*SUTRA_PASSWORD_MFA_REQUIRED: "true"$' deploy/ec2/compose.prod.yaml || die "mandatory MFA flag is missing."
 grep -Eq '^[[:space:]]*SUTRA_COLLECTOR_MODE: live$' deploy/ec2/compose.prod.yaml || die "live collector mode is missing."
 grep -Eq '^[[:space:]]*SUTRA_ALLOW_LIVE_AWS: "true"$' deploy/ec2/compose.prod.yaml || die "live AWS consent flag is missing."
+grep -Fq 'SUTRA_AWS_STATIC_KEYS_ENABLED: "${SUTRA_AWS_STATIC_KEYS_ENABLED:-false}"' deploy/ec2/compose.prod.yaml || die "Secrets Manager-backed AWS static-key emergency switch is missing."
 grep -Fq "Host:'www.\${SUTRA_DOMAIN:?Set SUTRA_DOMAIN in deploy/ec2/.env.ec2}'" deploy/ec2/compose.prod.yaml || die "app healthcheck does not use the canonical public Host."
 grep -Fq "'X-Forwarded-Proto':'https'" deploy/ec2/compose.prod.yaml || die "app healthcheck does not preserve public HTTPS provenance."
 grep -Fq 'not host origin.{$SUTRA_DOMAIN:sutracmdb.com} www.{$SUTRA_DOMAIN:sutracmdb.com} {$SUTRA_DOMAIN:sutracmdb.com}' deploy/ec2/Caddyfile || die "Caddy's exact tunnel-host allowlist is missing."

@@ -198,6 +198,25 @@ older digest never substitutes a historical customer-data snapshot: the older
 image must read current state or the release fails back to the current image and
 data. Mutable tags, GitHub tokens and host builds are deliberately unsupported.
 
+### AWS access-key emergency switch
+
+The committed operator template ships
+`SUTRA_AWS_STATIC_KEYS_ENABLED=false`. Keep it disabled until the
+`ManageOnlySutraCustomerAwsCredentialSecrets` instance-role policy has been
+applied in this stack and its exact account, Region, prefix, version-stage and
+seven-day deletion conditions have been verified. Then edit the ignored,
+mode-`0600` `deploy/ec2/.env.ec2` and set the value to exactly `true` before
+running `sudo bash deploy/ec2/redeploy.sh`.
+
+For an incident, set the same line back to exactly `false` and rerun
+`redeploy.sh`. This blocks new submissions and live static-credential use
+without selecting an older image that cannot read the new registry-reference
+shape. `release-update.sh` proves the value is unchanged when it copies all
+operator settings into a new immutable bundle. `sync-zoho-runtime.sh` updates
+only `.sutra/docker.env` and never edits `.env.ec2`; that later runtime env must
+not contain a duplicate static-key switch or it could override the emergency
+setting, so bootstrap/redeploy/release fail closed when one is present.
+
 ## Start, stop, and maintenance behavior
 
 From the operator workstation:

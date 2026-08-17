@@ -120,12 +120,22 @@ ensure_env_ec2() {
       warn "Non-interactive: review $ENV_EC2 and set SUTRA_DOMAIN if needed."
     fi
   fi
+  # Hosts created before the static-key backend have no explicit switch. Add
+  # the inert value once so later operator enable/disable changes survive every
+  # redeploy and immutable bundle replacement in the ignored environment file.
+  if ! grep -q '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$ENV_EC2"; then
+    printf '\nSUTRA_AWS_STATIC_KEYS_ENABLED=false\n' >> "$ENV_EC2"
+    warn "Added the disabled AWS static-key emergency switch to $ENV_EC2."
+  fi
   # Validate required keys are non-empty (no values are printed).
   # shellcheck disable=SC1090
-  local dom app_image collector_principal turnstile_site_key turnstile_secret_key
+  local dom app_image collector_principal static_keys_enabled static_keys_count
+  local turnstile_site_key turnstile_secret_key
   dom="$(grep -E '^SUTRA_DOMAIN=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   app_image="$(grep -E '^SUTRA_APP_IMAGE=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   collector_principal="$(grep -E '^SUTRA_COLLECTOR_PRINCIPAL_ARN=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
+  static_keys_enabled="$(grep -E '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
+  static_keys_count="$(grep -Ec '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$ENV_EC2" || true)"
   turnstile_site_key="$(grep -E '^SUTRA_TURNSTILE_SITE_KEY=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   turnstile_secret_key="$(grep -E '^SUTRA_TURNSTILE_SECRET_KEY=' "$ENV_EC2" | head -n1 | cut -d= -f2-)"
   [ -n "$dom" ]  || die "SUTRA_DOMAIN is empty in $ENV_EC2."
@@ -133,6 +143,12 @@ ensure_env_ec2() {
   [[ "$app_image" != 000000000000.* ]] || die "Replace the SUTRA_APP_IMAGE placeholder in $ENV_EC2 before deployment."
   [[ "$collector_principal" =~ ^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9+=,.@_/-]+$ ]] || die "SUTRA_COLLECTOR_PRINCIPAL_ARN must be the exact canonical IAM role ARN in $ENV_EC2."
   [[ "$collector_principal" != arn:aws:iam::000000000000:* ]] || die "Replace the SUTRA_COLLECTOR_PRINCIPAL_ARN placeholder before deployment."
+  [[ "$static_keys_count" == 1 ]] || die "SUTRA_AWS_STATIC_KEYS_ENABLED must appear exactly once in $ENV_EC2."
+  [[ "$static_keys_enabled" == true || "$static_keys_enabled" == false ]] || die "SUTRA_AWS_STATIC_KEYS_ENABLED must be exactly true or false in $ENV_EC2."
+  if grep -q '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$DOCKER_ENV"; then
+    die "Keep SUTRA_AWS_STATIC_KEYS_ENABLED only in $ENV_EC2; the later runtime env must not override the emergency switch."
+  fi
+  export SUTRA_AWS_STATIC_KEYS_ENABLED="$static_keys_enabled"
   [[ "$turnstile_site_key" =~ ^[A-Za-z0-9_-]{20,128}$ ]] || die "SUTRA_TURNSTILE_SITE_KEY is missing or invalid in $ENV_EC2."
   [[ "$turnstile_secret_key" =~ ^[A-Za-z0-9_-]{20,128}$ ]] || die "SUTRA_TURNSTILE_SECRET_KEY is missing or invalid in $ENV_EC2."
   [[ "$turnstile_site_key" != REPLACE_* && "$turnstile_secret_key" != REPLACE_* ]] || die "Replace both Cloudflare Turnstile placeholders in $ENV_EC2 before deployment."

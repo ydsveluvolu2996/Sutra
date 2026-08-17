@@ -105,8 +105,8 @@ const ONBOARD_PATHS: readonly OnboardPathOption[] = Object.freeze([
     id: "static_credentials",
     title: "Access keys",
     summary:
-      "The customer supplies access key, secret key and optional session token for a dedicated read-only IAM user. The collector stores them encrypted. Use when the customer cannot create a role at all.",
-    traits: ["No role required", "Stored encrypted", "Customer must rotate"],
+      "The customer supplies a long-lived AKIA access key and secret for a dedicated read-only IAM user. Sutra encrypts them in AWS Secrets Manager. Temporary session credentials are not accepted. Use only when the customer cannot create a role.",
+    traits: ["No role required", "AWS Secrets Manager", "Customer must rotate"],
   },
 ] as const);
 
@@ -132,8 +132,8 @@ interface RegisterRoleResponse {
   readonly collection: { readonly jobId: string; readonly status: "queued" };
 }
 
-// AWS long-lived (AKIA) and temporary (ASIA) access key IDs share this shape.
-const AWS_ACCESS_KEY_ID_PATTERN = /^(AKIA|ASIA)[A-Z0-9]{16}$/u;
+// Persistent onboarding accepts only a dedicated IAM user's long-lived key.
+const AWS_ACCESS_KEY_ID_PATTERN = /^AKIA[A-Z0-9]{16}$/u;
 const AWS_SECRET_ACCESS_KEY_LENGTH = 40;
 
 function describeStaticCredentialHealth(
@@ -143,12 +143,12 @@ function describeStaticCredentialHealth(
     case "active":
       return {
         label: "Validated",
-        detail: "GetCallerIdentity proved the stored encrypted access keys resolve to the expected AWS account.",
+        detail: "GetCallerIdentity proved the AWS Secrets Manager credential version resolves to the expected AWS account.",
       };
     case "validating":
       return {
         label: "Validating",
-        detail: "Sutra is proving the stored encrypted access keys resolve to the expected AWS account.",
+        detail: "Sutra is proving the AWS Secrets Manager credential version resolves to the expected AWS account.",
       };
     case "needs_attention":
       return {
@@ -339,7 +339,6 @@ export function OnboardAccount({
   // never rendered back, and are cleared on every submit.
   const [accessKeyId, setAccessKeyId] = useState("");
   const [secretAccessKey, setSecretAccessKey] = useState("");
-  const [sessionToken, setSessionToken] = useState("");
   const [registeredAccessKeyLast4, setRegisteredAccessKeyLast4] = useState<string | null>(null);
   const [rolePath, setRolePath] = useState(SUTRA_ROLE_NAMESPACE);
   const [roleName, setRoleName] = useState(SUTRA_TEMPLATE_ROLE_NAME);
@@ -399,10 +398,8 @@ export function OnboardAccount({
     ? validateCustomerManagedRoleSelection(rolePath, roleName)
     : null;
   const accessKeyIdValid = AWS_ACCESS_KEY_ID_PATTERN.test(accessKeyId);
-  const temporaryAccessKey = accessKeyId.startsWith("ASIA");
   const secretAccessKeyValid = secretAccessKey.length === AWS_SECRET_ACCESS_KEY_LENGTH;
-  const credentialsValid = accessKeyIdValid && secretAccessKeyValid &&
-    (!temporaryAccessKey || sessionToken.trim().length > 0);
+  const credentialsValid = accessKeyIdValid && secretAccessKeyValid;
   const credentialsRegistered = credentialConnection !== null && credentialConnection.status !== "pending";
   const credentialConnectionDisabled = credentialConnection?.status === "disabled";
   const roleValid = Boolean(
@@ -432,7 +429,7 @@ export function OnboardAccount({
   const wizardSteps: readonly WizardStep[] = [
     { label: "Connection", detail: "Customer, AWS account and grant path" },
     enteringAccessKeys
-      ? { label: "Enter access keys", detail: "Register keys the collector stores encrypted" }
+      ? { label: "Enter access keys", detail: "Register an AWS Secrets Manager credential version" }
       : { label: "Deploy role", detail: "Create the role in the customer account" },
     { label: "Validate trust", detail: "Prove the ExternalId boundary" },
     { label: "Inventory", detail: "Publish the first complete snapshot" },
@@ -552,7 +549,7 @@ export function OnboardAccount({
         setNotice({
           tone: "success",
           title: "Connection contract created",
-          message: "Enter the customer's dedicated read-only access keys below. The collector verifies the account with GetCallerIdentity and stores them encrypted; they are never displayed again.",
+          message: "Enter the customer's dedicated read-only access keys below. The collector verifies the AWS account with GetCallerIdentity, then promotes the encrypted AWS Secrets Manager version; the values are never displayed again.",
         });
         await refresh();
       } catch (caught) {
@@ -717,22 +714,15 @@ export function OnboardAccount({
     setBusy("credentials");
     setError(null);
     setNotice(null);
-    const payload: {
-      connectionId: string;
-      accessKeyId: string;
-      secretAccessKey: string;
-      sessionToken?: string;
-    } = {
+    const payload = {
       connectionId: credentialConnection.id,
       accessKeyId,
       secretAccessKey,
     };
-    if (temporaryAccessKey) payload.sessionToken = sessionToken;
     // Clear the secrets from component state before the request resolves so
     // they never outlive the submit, whether it succeeds or fails.
     setAccessKeyId("");
     setSecretAccessKey("");
-    setSessionToken("");
     try {
       const response = await postPilot<RegisterCredentialsResponse>(
         "/api/pilot/connections/credentials",
@@ -742,8 +732,8 @@ export function OnboardAccount({
       setRegisteredAccessKeyLast4(response.verification.accessKeyLast4);
       setNotice({
         tone: "success",
-        title: "Access keys verified and stored encrypted",
-        message: `AWS returned caller identity ${response.verification.callerIdentityArn} in account ${response.verification.accountId}. Access key ····${response.verification.accessKeyLast4} is stored encrypted by the collector and the first collection job is ${response.collection.status}.`,
+        title: "Access keys verified and stored in AWS Secrets Manager",
+        message: `AWS returned caller identity ${response.verification.callerIdentityArn} in account ${response.verification.accountId}. Access key ····${response.verification.accessKeyLast4} is encrypted in AWS Secrets Manager and the first collection job is ${response.collection.status}.`,
       });
       await refresh();
     } catch (caught) {
@@ -826,7 +816,7 @@ export function OnboardAccount({
         tone: "success",
         title: credentialConnection ? "Credential binding revalidated" : "Trust boundary revalidated",
         message: credentialConnection
-          ? "GetCallerIdentity confirmed the stored encrypted access keys still resolve to the expected AWS account. Inventory was not run by this action."
+          ? "GetCallerIdentity confirmed the active AWS Secrets Manager credential version still resolves to the expected AWS account. This proves identity, not the IAM user's effective least privilege. Inventory was not run by this action."
           : "The expected caller identity and both negative ExternalId probes passed. Inventory was not run by this action.",
       });
       await refresh();
@@ -894,14 +884,14 @@ export function OnboardAccount({
       setNotice({
         tone: response.collectorCleanup === "completed" ? "success" : "warning",
         title: response.collectorCleanup === "completed"
-          ? "Local AWS trust offboarded"
-          : "Local AWS trust offboarded; collector cleanup pending",
+          ? credentialConnection ? "AWS access-key connection offboarded" : "Local AWS trust offboarded"
+          : credentialConnection ? "AWS access-key connection blocked; secret cleanup pending" : "Local AWS trust offboarded; collector cleanup pending",
         message: response.collectorCleanup === "completed"
           ? credentialConnection
-            ? "Sutra and its collector erased the encrypted access keys. CMDB and audit history remain. The customer's IAM access keys still exist in AWS; deactivate and delete them in the IAM console."
+            ? "Sutra blocked all future use and scheduled the AWS Secrets Manager secret for deletion after a seven-day recovery window. CMDB and audit history remain. The customer's IAM access key still exists in their AWS account; deactivate and delete it in IAM now."
             : "Sutra and its collector removed their trust material. CMDB and audit history remain. The customer-owned IAM role is unchanged; delete its CloudFormation stack or remove its trust policy in AWS."
           : credentialConnection
-            ? "Sutra removed its control-plane credential material and blocked future work. Restore the collector service and reconcile cleanup. The customer's IAM access keys must still be deactivated and deleted in AWS."
+            ? "Sutra blocked future work, but could not yet schedule the AWS Secrets Manager secret for deletion. Restore the collector service and reconcile cleanup. The customer's IAM access key must still be deactivated and deleted in AWS."
             : "Sutra removed its control-plane trust material and blocked future work. Restore the collector service and reconcile cleanup. The customer-owned IAM role is unchanged and must be revoked separately in AWS.",
       });
       await refresh();
@@ -984,7 +974,7 @@ export function OnboardAccount({
                       type="radio"
                       value="static_credentials"
                     />
-                    <span><strong>Access &amp; Secret Keys</strong><small>{staticCredentialsEnabled ? "For dedicated read-only IAM users when role creation is impossible." : "Unavailable until Sutra's reviewed AWS Secrets Manager storage boundary is deployed."}</small></span>
+                    <span><strong>Access &amp; Secret Keys</strong><small>{staticCredentialsEnabled ? "For dedicated read-only IAM users when role creation is impossible." : "Unavailable because this deployment has not enabled Sutra's reviewed AWS Secrets Manager storage boundary."}</small></span>
                   </label>
                 </fieldset>
                 <p className="onboard-guide-link">Check Sutra <a href="/onboard/guide">AWS Start Guide</a>.</p>
@@ -1070,7 +1060,7 @@ export function OnboardAccount({
                   </div>
                   <div className="inline-warning" role={customerManagedRoleError ? "alert" : "note"}><strong>{customerManagedRoleError ? "Role contract needs attention" : "Dedicated customer role required"}</strong><span>{customerManagedRoleError ?? "Existing admin, shared operations, power-user, break-glass, account-access, broader-policy, and wildcard-trust roles are rejected during live attestation. Every accepted session is still intersected with Sutra's fixed read-only STS session policy."}</span></div>
                 </> : null}
-                </> : <div className="inline-warning" role="note"><strong>Access keys are entered in the next step.</strong><span>After the connection contract exists, Sutra asks for a dedicated read-only IAM user&apos;s access key ID and secret (plus a session token for temporary ASIA keys), verifies the account with GetCallerIdentity, and stores them encrypted in the collector. Keys never accompany this create request.</span></div>}
+                </> : <div className="inline-warning" role="note"><strong>Access keys are entered in the next step.</strong><span>After the connection contract exists, Sutra asks for a dedicated read-only IAM user&apos;s long-lived access key ID and secret, stages them encrypted in AWS Secrets Manager, and promotes the version only after GetCallerIdentity verifies the account. Temporary session credentials are not accepted. Keys never accompany this create request.</span></div>}
                 {/* Stated, not offered. Every row is verified against the
                     deployed pack YAML by
                     tests/aws-onboarding-role-capabilities.test.mjs, so a row
@@ -1167,7 +1157,7 @@ export function OnboardAccount({
                 </>
               ) : null}
               <ConnectionWorkArea collapsed={connectionSetupComplete}>
-              <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below with the selected deployment method. Sutra never creates customer access keys, and this recommended role method stores no long-lived customer secret at all. (Only the optional access-key onboarding method stores customer-supplied keys, encrypted in the collector.)</p></div>
+              <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Deploy and register the customer role</h2><p>Use the exact collector principal and ExternalId below with the selected deployment method. Sutra never creates customer access keys, and this recommended role method stores no long-lived customer secret at all. (Only the optional access-key onboarding method stores customer-supplied keys, encrypted in AWS Secrets Manager.)</p></div>
               <div className="connection-contract" aria-label="AWS connection contract">
                 <div><small>Customer</small><strong>{connection.customerName}</strong><span>{connection.awsAccountId} · {connection.partition}</span></div>
                 <div><small>Region scope</small><strong>{isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All" : connection.enabledRegions.length}</strong><span>{isAllEnabledAwsRegionSelection(connection.enabledRegions) ? "All account-enabled Regions; discovered at collection time" : connection.enabledRegions.join(", ")}</span></div>
@@ -1309,11 +1299,11 @@ export function OnboardAccount({
                 </>
               ) : null}
               <ConnectionWorkArea collapsed={connectionSetupComplete}>
-              <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Enter and register the customer access keys</h2><p>Sutra sends the keys once over this authenticated session to its collector, which proves the AWS account with GetCallerIdentity and stores them encrypted. With this method the collector does store the customer-supplied keys; the IAM role method remains the recommended default. Keys are never echoed back, logged, or kept in this browser.</p></div>
+              <div className="onboard-copy"><p className="eyebrow">Step 2 of 4</p><h2>Enter and register the customer access keys</h2><p>Sutra sends the keys once over this authenticated session to its collector, which stages them encrypted in AWS Secrets Manager and promotes the version only after GetCallerIdentity proves the AWS account. This method stores the customer-supplied keys; IAM Role remains the recommended default. Keys are never echoed back, logged, or kept in this browser.</p></div>
               <div className="connection-contract" aria-label="AWS connection contract">
                 <div><small>Customer</small><strong>{credentialConnection.customerName}</strong><span>{credentialConnection.awsAccountId} · {credentialConnection.partition}</span></div>
                 <div><small>Region scope</small><strong>{isAllEnabledAwsRegionSelection(credentialConnection.enabledRegions) ? "All" : credentialConnection.enabledRegions.length}</strong><span>{isAllEnabledAwsRegionSelection(credentialConnection.enabledRegions) ? "All account-enabled Regions; discovered at collection time" : credentialConnection.enabledRegions.join(", ")}</span></div>
-                <div><small>Connection method</small><strong>Access keys</strong><span>{registeredAccessKeyLast4 ? `Access key ····${registeredAccessKeyLast4}` : credentialsRegistered ? "Encrypted access key registered" : "No access key registered yet"}</span></div>
+                <div><small>Connection method</small><strong>Access keys</strong><span>{registeredAccessKeyLast4 ? `Access key ····${registeredAccessKeyLast4}` : credentialsRegistered ? "AWS Secrets Manager reference registered" : "No access key registered yet"}</span></div>
                 <div><small>Credential health</small><strong className={`connection-status connection-${credentialConnection.status}`} title={trustHealth?.detail}>{trustHealth?.label}</strong><span>Validated {formatTimestamp(credentialConnection.lastValidatedAt)}</span></div>
               </div>
 
@@ -1323,31 +1313,30 @@ export function OnboardAccount({
                 <div className="inline-warning" role="status"><strong>Latest inventory: {collectionHealth.title}</strong><span>{collectionHealth.message}</span></div>
               ) : null}
 
-              {credentialsRegistered && registeredAccessKeyLast4 ? <div className="validation-result" role="status"><span>✓</span><div><strong>Access key ····{registeredAccessKeyLast4} registered</strong><p>The collector verified the caller identity, stored the keys encrypted, and queued the first collection job. Neither key value will ever be displayed again.</p></div></div> : null}
+              {credentialsRegistered && registeredAccessKeyLast4 ? <div className="validation-result" role="status"><span>✓</span><div><strong>Access key ····{registeredAccessKeyLast4} registered</strong><p>The collector verified the caller identity, promoted the encrypted AWS Secrets Manager version, and queued the first collection job. Neither key value will ever be displayed again.</p></div></div> : null}
 
               {staticCredentialsEnabled ? <>
               <form className="onboard-form credentials-registration" onSubmit={registerCredentials} autoComplete="off">
-                <label><span>Access key ID</span><input type="password" autoComplete="off" spellCheck={false} maxLength={20} value={accessKeyId} onChange={(event) => setAccessKeyId(event.target.value.trim())} aria-invalid={accessKeyId.length > 0 && !accessKeyIdValid} required /><small>AKIA (long-lived) or ASIA (temporary) followed by exactly 16 uppercase letters or digits.</small></label>
-                <label><span>Secret access key</span><input type="password" autoComplete="off" spellCheck={false} maxLength={40} value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value.trim())} aria-invalid={secretAccessKey.length > 0 && !secretAccessKeyValid} required /><small>Exactly 40 characters. Sent once, stored encrypted by the collector, never displayed again.</small></label>
-                {temporaryAccessKey ? <label><span>Session token</span><input type="password" autoComplete="off" spellCheck={false} value={sessionToken} onChange={(event) => setSessionToken(event.target.value.trim())} required /><small>Required for temporary ASIA keys. Temporary credentials expire on AWS&apos;s schedule and must be re-submitted here after each rotation.</small></label> : null}
-                <p className="limitation-note">Use keys from a dedicated read-only IAM user, never root or administrator keys. Sutra proves GetCallerIdentity resolves the keys to account {credentialConnection.awsAccountId} before registration commits, caps every in-memory collector session at 900 seconds, and clears this form on every submit.</p>
-                <button className="button button-secondary onboard-submit" type="submit" disabled={!credentialsValid || credentialConnectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "credentials" ? "Verifying & encrypting keys…" : collectorMode === "live" ? credentialsRegistered ? "Verify & rotate access keys" : "Verify & register access keys" : "Live collector required"}</button>
+                <label><span>Access key ID</span><input type="password" autoComplete="off" spellCheck={false} maxLength={20} value={accessKeyId} onChange={(event) => setAccessKeyId(event.target.value.trim())} aria-invalid={accessKeyId.length > 0 && !accessKeyIdValid} required /><small>AKIA followed by exactly 16 uppercase letters or digits. Use a dedicated IAM user; temporary ASIA session credentials are not accepted.</small></label>
+                <label><span>Secret access key</span><input type="password" autoComplete="off" spellCheck={false} maxLength={40} value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value.trim())} aria-invalid={secretAccessKey.length > 0 && !secretAccessKeyValid} required /><small>Exactly 40 characters. Sent once, encrypted in AWS Secrets Manager, never displayed again.</small></label>
+                <p className="limitation-note">Use keys from a dedicated read-only IAM user, never root or administrator keys. GetCallerIdentity proves only that the keys resolve to account {credentialConnection.awsAccountId}; it does not prove least privilege, which remains determined by the IAM policies in that account. Long-lived keys remain valid in AWS until you rotate or revoke them; Sutra resolves the active secret version only for a bounded collector operation and clears this form on every submit.</p>
+                <button className="button button-secondary onboard-submit" type="submit" disabled={!credentialsValid || credentialConnectionDisabled || busy !== null || collectorMode !== "live"}>{busy === "credentials" ? "Verifying & storing keys…" : collectorMode === "live" ? credentialsRegistered ? "Verify & rotate access keys" : "Verify & register access keys" : "Live collector required"}</button>
               </form>
 
               <div className="onboard-validation-action">
-                <div><p className="eyebrow">Step 3 of 4</p><h2>{credentialConnection.status === "active" ? "Account binding proven" : "Prove the account binding"}</h2><p>{credentialConnection.status === "active" ? "GetCallerIdentity confirmed the stored encrypted keys resolve to the expected AWS account, and the binding is re-proven on every collector session." : "Sutra proves GetCallerIdentity resolves the stored encrypted keys to the expected AWS account before any collection starts."}</p></div>
+                <div><p className="eyebrow">Step 3 of 4</p><h2>{credentialConnection.status === "active" ? "Account binding proven" : "Prove the account binding"}</h2><p>{credentialConnection.status === "active" ? "GetCallerIdentity confirmed the active AWS Secrets Manager credential version resolves to the expected AWS account, and the identity binding is re-proven on every collector session. IAM policy still determines effective permissions." : "Sutra proves GetCallerIdentity resolves the staged AWS Secrets Manager credential version to the expected AWS account before any collection starts. This verifies identity, not least privilege."}</p></div>
                 {credentialConnection.status === "active" ? <div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void revalidateTrust()}>{busy === "validate" ? "Revalidating credentials…" : "Revalidate credentials"}</button><button className="button button-primary" type="button" disabled={busy !== null || collectorMode !== "live"} onClick={() => void runSync()}>{busy === "sync" ? "Collecting AWS metadata…" : collectorMode === "live" ? "Run inventory sync" : "Live collector required"}</button></div> : credentialConnection.status === "disabled" ? <span className="status-pill status-medium">Connection disabled</span> : <button className="button button-primary" type="button" disabled={!credentialsRegistered || busy !== null || collectorMode !== "live"} onClick={() => void validateAndSync()}>{busy === "validate" ? "Validating credentials…" : busy === "sync" ? "Publishing first snapshot…" : collectorMode === "live" ? "Validate credentials & run first sync" : "Live collector required"}</button>}
               </div>
-              </> : <div className="inline-warning" role="alert"><strong>Access-key onboarding is disabled.</strong><span>This legacy connection cannot validate, rotate, or collect until Sutra stores only an AWS Secrets Manager reference and resolves the secret at job execution. Disable or offboard it below, and use IAM Role for new onboarding.</span></div>}
+              </> : <div className="inline-warning" role="alert"><strong>Access-key onboarding is disabled.</strong><span>This deployment has not enabled the reviewed AWS Secrets Manager boundary, so this connection cannot validate, rotate, or collect. Disable or offboard it below, and use IAM Role for new onboarding.</span></div>}
 
               <section id="connection-lifecycle" className="connection-lifecycle" aria-labelledby="connection-lifecycle-title">
-                <div><p className="eyebrow">Trust lifecycle</p><h2 id="connection-lifecycle-title">Control or remove collector access</h2><p>These actions never delete CMDB snapshots. Offboarding erases the encrypted access keys from Sutra and asks the collector to erase its copy. It cannot deactivate the customer&apos;s IAM access keys; deactivate and delete them separately in the AWS IAM console.</p></div>
+                <div><p className="eyebrow">Trust lifecycle</p><h2 id="connection-lifecycle-title">Control or remove collector access</h2><p>These actions never delete CMDB snapshots. Disabling blocks live use but retains the encrypted AWS Secrets Manager secret. Offboarding blocks live use and schedules that secret for deletion after a seven-day recovery window. Neither action deactivates the customer&apos;s IAM access key; deactivate and delete it separately in AWS IAM.</p></div>
                 <div className="connection-lifecycle-actions">
                   <button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => void disableConnection()}>{busy === "disable" ? credentialConnectionDisabled ? "Reconciling…" : "Disabling…" : credentialConnectionDisabled ? "Reconcile collector disable" : "Disable connection"}</button>
                   <button className="button button-danger" type="button" disabled={busy !== null} onClick={() => setConfirmingOffboard(true)}>Offboard access keys</button>
                 </div>
-                {staticCredentialsEnabled ? <div className="inline-warning"><strong>Rotate by re-submitting new keys.</strong><span>Create a new access key on the same dedicated IAM user, submit it through the form above, then deactivate and delete the old key in AWS IAM. Sutra replaces the stored encrypted keys after verification and never displays either value.</span></div> : null}
-                {confirmingOffboard ? <div className="offboard-confirmation" role="group" aria-label="Confirm access-key offboarding"><strong>Confirm permanent access-key removal</strong><p>Enter AWS account ID <code>{credentialConnection.awsAccountId}</code> and a fresh authenticator code. Sutra will retain CMDB and audit evidence, but this connection cannot be reactivated. This does not deactivate the customer&apos;s IAM access keys; deactivate and delete them separately in AWS IAM.</p><input aria-label="AWS account ID confirmation" inputMode="numeric" maxLength={12} value={offboardConfirmation} onChange={(event) => setOffboardConfirmation(event.target.value.replace(/\D/gu, ""))} /><input aria-label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={offboardStepUpCode} onChange={(event) => setOffboardStepUpCode(event.target.value.replace(/\D/gu, ""))} /><div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => { setConfirmingOffboard(false); setOffboardConfirmation(""); setOffboardStepUpCode(""); }}>Cancel</button><button className="button button-danger" type="button" disabled={busy !== null || offboardConfirmation !== credentialConnection.awsAccountId || !/^\d{6}$/u.test(offboardStepUpCode)} onClick={() => void offboardConnection()}>{busy === "offboard" ? "Removing access keys…" : "Verify & confirm offboarding"}</button></div></div> : null}
+                {staticCredentialsEnabled ? <div className="inline-warning"><strong>Rotate by re-submitting new keys.</strong><span>Create a new access key on the same dedicated IAM user and submit it above. Sutra stages and verifies a new AWS Secrets Manager version before promoting it; then deactivate and delete the old key in AWS IAM. Sutra never displays either value.</span></div> : null}
+                {confirmingOffboard ? <div className="offboard-confirmation" role="group" aria-label="Confirm access-key offboarding"><strong>Confirm permanent access-key offboarding</strong><p>Enter AWS account ID <code>{credentialConnection.awsAccountId}</code> and a fresh authenticator code. Sutra will retain CMDB and audit evidence, block future use, and schedule its AWS Secrets Manager secret for deletion after seven days; this connection cannot be reactivated. This does not deactivate the customer&apos;s IAM access key, so deactivate and delete it separately in AWS IAM.</p><input aria-label="AWS account ID confirmation" inputMode="numeric" maxLength={12} value={offboardConfirmation} onChange={(event) => setOffboardConfirmation(event.target.value.replace(/\D/gu, ""))} /><input aria-label="Authenticator code" autoComplete="one-time-code" inputMode="numeric" maxLength={6} pattern="[0-9]{6}" value={offboardStepUpCode} onChange={(event) => setOffboardStepUpCode(event.target.value.replace(/\D/gu, ""))} /><div className="heading-actions"><button className="button button-secondary" type="button" disabled={busy !== null} onClick={() => { setConfirmingOffboard(false); setOffboardConfirmation(""); setOffboardStepUpCode(""); }}>Cancel</button><button className="button button-danger" type="button" disabled={busy !== null || offboardConfirmation !== credentialConnection.awsAccountId || !/^\d{6}$/u.test(offboardStepUpCode)} onClick={() => void offboardConnection()}>{busy === "offboard" ? "Scheduling secret deletion…" : "Verify & confirm offboarding"}</button></div></div> : null}
               </section>
               </ConnectionWorkArea>
             </>

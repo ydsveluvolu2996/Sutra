@@ -428,6 +428,27 @@ awk -v image="$NEW_IMAGE" '
 ' "$ENV_EC2" > "$STAGE_ROOT/deploy/ec2/.env.ec2"
 chmod 0600 "$STAGE_ROOT/deploy/ec2/.env.ec2"
 
+# Prove the emergency switch survived the all-settings copy before rendering or
+# mutating the active bundle. Missing on a pre-feature host means disabled.
+current_static_keys_count="$(grep -Ec '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$ENV_EC2" || true)"
+staged_static_keys_count="$(grep -Ec '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$STAGE_ROOT/deploy/ec2/.env.ec2" || true)"
+[[ "$current_static_keys_count" == 0 || "$current_static_keys_count" == 1 ]] || \
+  die "SUTRA_AWS_STATIC_KEYS_ENABLED appears more than once in the current operator environment."
+[[ "$staged_static_keys_count" == "$current_static_keys_count" ]] || \
+  die "The AWS static-key emergency switch was not preserved in the staged release."
+current_static_keys_enabled="$(awk -F= '$1 == "SUTRA_AWS_STATIC_KEYS_ENABLED" {sub(/^[^=]*=/, ""); print; exit}' "$ENV_EC2")"
+staged_static_keys_enabled="$(awk -F= '$1 == "SUTRA_AWS_STATIC_KEYS_ENABLED" {sub(/^[^=]*=/, ""); print; exit}' "$STAGE_ROOT/deploy/ec2/.env.ec2")"
+current_static_keys_enabled="${current_static_keys_enabled:-false}"
+staged_static_keys_enabled="${staged_static_keys_enabled:-false}"
+[[ "$current_static_keys_enabled" == true || "$current_static_keys_enabled" == false ]] || \
+  die "SUTRA_AWS_STATIC_KEYS_ENABLED must be exactly true or false in the current operator environment."
+[[ "$staged_static_keys_enabled" == "$current_static_keys_enabled" ]] || \
+  die "The AWS static-key emergency switch changed while staging the release."
+if grep -q '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$DOCKER_ENV"; then
+  die "Keep SUTRA_AWS_STATIC_KEYS_ENABLED only in $ENV_EC2; the later runtime env must not override the emergency switch."
+fi
+export SUTRA_AWS_STATIC_KEYS_ENABLED="$staged_static_keys_enabled"
+
 # Render before touching the active host bundle. This catches malformed Compose
 # changes, missing environment keys and relative-volume regressions.
 docker compose \

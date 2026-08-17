@@ -62,7 +62,7 @@ const PV_FIX = pvRows("guided remediation", []);
 
 type Cap = { code: string; label: string; t: string; icon: string; title: string; blurb: string; points: string[]; pv: string; g?: string };
 const CAPS: Cap[] = [
-  { code: "COLLECT", g: "See & prioritize", label: "Agentless collection", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>', title: "Agentless AWS collection", blurb: "Regional metadata collectors use a customer-owned IAM role and temporary STS credentials. Supported assets populate after a complete run; uncovered or failed sources remain explicit.", points: ["Customer-owned role via STS", "No agents · no stored access keys", "Complete snapshots normalized into one CMDB"], pv: PV_INVENTORY },
+  { code: "COLLECT", g: "See & prioritize", label: "Agentless collection", t: "#22d3ee", icon: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/>', title: "Agentless AWS collection", blurb: "Regional metadata collectors use a customer-owned IAM role and temporary STS credentials by default. Supported assets populate after a complete run; uncovered or failed sources remain explicit.", points: ["Customer-owned role via STS", "No agents · role path stores no access key", "Complete snapshots normalized into one CMDB"], pv: PV_INVENTORY },
   { code: "GRAPH", label: "Security graph", t: "#3b82f6", icon: '<circle cx="5" cy="12" r="2.2"/><circle cx="14" cy="6" r="2.2"/><circle cx="14" cy="18" r="2.2"/><circle cx="21" cy="12" r="2.2"/><path d="M7 11 12 7M7 13 12 17M16 7l3 4M16 17l3-4"/>', title: "Evidence-backed security graph", blurb: "Collected cloud, Kubernetes, identity, and network relationships share one model, with observation-backed edges and explicit missing evidence.", points: ["Cloud + cluster + identity in one model", "Confirmed vs. theoretical reachability", "Click an observed edge to see its evidence"], pv: PV_GRAPH },
   { code: "ISSUES", label: "Runtime-informed issues", t: "#fb7185", icon: '<path d="M12 3 22 20H2z"/><path d="M12 10v5M12 18h.01"/>', title: "Runtime-informed issues", blurb: "Prioritize collected vulnerability and exposure evidence when the required network, workload, and scanner sources are available.", points: ["Toxic-combination detection", "Reachability from configured network sources", "Prioritized by exposure, not just CVSS"], pv: pvRows("issues · prioritized", []) },
   { code: "CIEM", label: "Effective permissions", t: "#8b5cf6", icon: '<circle cx="8" cy="13" r="4"/><path d="m11 10 9-9M17 4l3 3"/>', title: "Effective permissions", blurb: "Resolve collected Kubernetes RBAC and follow configured IRSA or EKS Pod Identity links into AWS.", points: ["In-cluster RBAC solver", "IRSA + Pod Identity → AWS reach", "Flags: secrets, exec, unused SA"], pv: pvRows("effective permissions", []) },
@@ -134,7 +134,7 @@ const DIFFERENTIATORS = [
   { c: "03", h: "Reachability, hop by hop", p: "Internet exposure is a proven path, not a security-group guess: gateway route, NACL port filter, load-balancer target, DNS entry point — each hop present, or the verdict is unknown.", proof: "IGW route · open vs filtered ports · LB targets · DNS entry points" },
   { c: "04", h: "One platform, not seven point tools", p: "CNAPP posture, universal CMDB, FinOps, vulnerability management, patch posture and compliance readiness all resolve against a single evidence graph — not six consoles you reconcile by hand.", proof: "CNAPP · CMDB · FinOps · vuln · patch · compliance — one graph" },
   { c: "05", h: "A CMDB that reaches beyond the cloud", p: "The normalized asset graph ingests AWS and EKS, plus imported SaaS, network devices and on-prem assets — with a relationship and dependency graph that shows the blast radius before you change anything.", proof: "Cloud + SaaS + network + on-prem · dependency & blast-radius graph" },
-  { c: "06", h: "Nothing of yours is ever deleted", p: "Read-only STS with no keys stored. Agentless disk scanning is the one opt-in that writes, and it can only create snapshots it tags itself — Sutra holds an explicit deny on every delete, so cleanup runs from your own lifecycle policy, in your account, pausable from your console.", proof: "Read-only STS · no keys stored · explicit deny on all deletes · you own cleanup" },
+  { c: "06", h: "Nothing of yours is ever deleted", p: "The recommended role uses read-only STS and stores no customer access key. Agentless disk scanning is the role's one opt-in that writes, and it can only create snapshots it tags itself — Sutra holds an explicit deny on every delete, so cleanup runs from your own lifecycle policy, in your account, pausable from your console.", proof: "Recommended role: read-only STS · no customer key stored · explicit deny on deletes" },
 ];
 
 const LAYERS = [
@@ -203,15 +203,15 @@ const TRUST_BADGES = [
   "SOC 2 readiness mapping — not a certification",
   "Read-only by default, customer-owned access",
   "Every finding cited to collected evidence",
-  "No customer access keys stored",
+  "IAM role recommended · optional keys encrypted",
   "Data-minimizing by design",
 ];
 const FAQ: Array<{ q: string; a: string }> = [
-  { q: "How does onboarding work?", a: "You deploy a customer-owned IAM role from the CloudFormation template we provide. A separate collector workload assumes that role with temporary STS credentials and performs read-only, metadata-only discovery — no agents on your workloads, no access keys stored. Book a walkthrough to see the full product before connecting any account." },
-  { q: "Is the access really read-only?", a: "By default, yes — the role grants metadata-only permission packs, is owned by you, and is scoped with a unique platform-generated ExternalId. No customer access keys ever leave your account or enter the browser or web control plane. There is exactly one exception, and it is off unless you turn it on: agentless disk scanning needs to create an EBS snapshot to read a volume's contents without an agent. That grant is deliberately narrow — Sutra can only create snapshots tagged sutra-agentless, can only share them with its own scan account, and carries an explicit IAM deny on DeleteSnapshot, DeleteVolume, DetachVolume, TerminateInstances and StopInstances. It cannot read, share, or delete your own snapshots or backups." },
+  { q: "How does onboarding work?", a: "The recommended path deploys a customer-owned IAM role from our CloudFormation template. A collector assumes it with temporary STS credentials and performs read-only, metadata-only discovery, with no customer access key stored. If role creation is impossible, an optional dedicated-IAM-user path stores the submitted key encrypted in AWS Secrets Manager; the customer remains responsible for its IAM policy and rotation." },
+  { q: "Is the access really read-only?", a: "With the recommended role, yes by default — it grants metadata-only permission packs, is owned by you, and is scoped with a unique platform-generated ExternalId. The optional access-key method cannot prove least privilege; GetCallerIdentity verifies the account, while the IAM policies you attach determine effective access. The role has one opt-in exception: agentless disk scanning needs to create a tagged EBS snapshot. That grant is deliberately narrow and carries explicit denies for destructive actions." },
   { q: "So Sutra can delete my snapshots?", a: "No — it has no delete permission at all, by explicit deny. That raises a fair question: who cleans up the scan snapshots so they stop costing you money? The same CloudFormation stack installs an AWS Data Lifecycle Manager policy in your account, running under your own service role, which deletes only sutra-agentless-tagged snapshots on a retention window you choose. You can inspect, pause, retune, or delete that policy from your console at any time. Sutra keeps scanning either way; it simply starts reporting uncleaned snapshots to you as cost." },
   { q: "Which clouds and platforms are supported?", a: "AWS and Amazon EKS. Sutra is not multi-cloud — there is no Azure or GCP support. Within that scope it correlates cloud, Kubernetes, identity, network, runtime and supply-chain evidence into one graph." },
-  { q: "How is my data handled?", a: "Data-minimizing by design: only normalized, scoped metadata evidence is validated and promoted after a complete collection run. Customer credentials never reach the browser or the web control plane, and each customer sees only the workspaces explicitly granted to them." },
+  { q: "How is my data handled?", a: "Data-minimizing by design: only normalized, scoped metadata evidence is promoted after a complete collection run. The recommended role stores no customer access key. If you choose the optional access-key method, the submitted value is encrypted in AWS Secrets Manager and the web control plane retains only a non-secret reference. Each customer sees only the workspaces explicitly granted to them." },
   { q: "Is there an API?", a: "Yes — a versioned, tenant-scoped REST API at /api/public/v1 with scoped service-account tokens, cursor pagination and idempotent writes, plus typed TypeScript and Python SDKs generated from the OpenAPI spec. Automation reads resources, findings, cases, vulnerabilities and compliance exactly as the UI does." },
   { q: "Are you SOC 2 or ISO certified?", a: "We do not claim certifications the product does not hold. Sutra maps collected evidence to CIS Kubernetes, NSA/CISA and SOC 2 (CC) controls as an honest readiness view — a readiness mapping, never a pass stamp or a certification badge." },
 ];
@@ -804,7 +804,7 @@ export default function LandingZone() {
             <Link className="btn btn-solid" href="/contact">Book a walkthrough <Arrow /></Link>
             <a className="btn" href="#trust">Review the trust model</a>
           </div>
-          <div className="assur"><span><b>✓</b> Read-only by default, customer-owned</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> No customer access keys</span></div>
+          <div className="assur"><span><b>✓</b> IAM role recommended, customer-owned</span><span><b>✓</b> Every finding cited</span><span><b>✓</b> Optional keys encrypted in AWS Secrets Manager</span></div>
         </div>
         <div className="lx-hero-stage">
           <div className="card">
@@ -919,17 +919,18 @@ export default function LandingZone() {
         <div className="wrap trust-in">
           <div className="rise">
             <span className="sec-kicker">Trust is a product feature</span>
-            <h2>Customer credentials never enter the browser or web control plane.</h2>
-            <p className="lead">A separate collector workload assumes the customer role with temporary STS credentials. The application receives normalized, scoped evidence — not access keys.</p>
+            <h2>The recommended IAM role stores no customer access key.</h2>
+            <p className="lead">A collector assumes the customer role with temporary STS credentials. If role creation is impossible, the optional access-key method stores the submitted credential encrypted in AWS Secrets Manager and keeps only a non-secret reference in the web control plane.</p>
             <ul><li><span>01</span> Exact vendor workload-role principal</li><li><span>02</span> Unique, platform-generated ExternalId</li><li><span>03</span> Positive and negative trust validation</li><li><span>04</span> Metadata-only permission packs</li></ul>
             <a className="btn btn-solid" href="#architecture">Review the security architecture <Arrow /></a>
           </div>
           <div className="lx-trust-panel rise">
+            <div className="row"><b>recommended method</b><span className="ok">IAM role</span></div>
             <div className="row"><b>role principal</b><span>arn:aws:iam::…:role/sutra-collector</span></div>
             <div className="row"><b>credential type</b><span className="ok">STS · temporary</span></div>
             <div className="row"><b>permission pack</b><span>read-only · metadata · no deletes ever</span></div>
             <div className="row"><b>external id</b><span>platform-generated</span></div>
-            <div className="row"><b>keys stored</b><span className="ok">none</span></div>
+            <div className="row"><b>customer keys stored by role path</b><span className="ok">none</span></div>
           </div>
         </div>
       </section>

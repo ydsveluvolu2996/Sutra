@@ -43,6 +43,21 @@ if [[ -x "$SCRIPT_DIR/sync-zoho-runtime.sh" ]]; then
   fi
 fi
 
+# The ignored operator file is the sole authority for this non-secret emergency
+# switch. Export its effective value so an ambient shell variable cannot override
+# it during Compose interpolation. Older hosts without the line remain disabled.
+static_keys_count="$(grep -Ec '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$ENV_EC2" || true)"
+[[ "$static_keys_count" == 0 || "$static_keys_count" == 1 ]] || \
+  die "SUTRA_AWS_STATIC_KEYS_ENABLED must appear at most once in $ENV_EC2."
+static_keys_enabled="$(awk -F= '$1 == "SUTRA_AWS_STATIC_KEYS_ENABLED" {sub(/^[^=]*=/, ""); print; exit}' "$ENV_EC2")"
+static_keys_enabled="${static_keys_enabled:-false}"
+[[ "$static_keys_enabled" == true || "$static_keys_enabled" == false ]] || \
+  die "SUTRA_AWS_STATIC_KEYS_ENABLED must be exactly true or false in $ENV_EC2."
+if grep -q '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$DOCKER_ENV"; then
+  die "Keep SUTRA_AWS_STATIC_KEYS_ENABLED only in $ENV_EC2; the later runtime env must not override the emergency switch."
+fi
+export SUTRA_AWS_STATIC_KEYS_ENABLED="$static_keys_enabled"
+
 DOCKER="docker"
 docker info >/dev/null 2>&1 || { sudo docker info >/dev/null 2>&1 && DOCKER="sudo docker"; } || die "Docker daemon unreachable."
 ROOT_RUN=()

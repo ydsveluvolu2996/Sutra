@@ -3,7 +3,9 @@ import {
   parseCollectorHealth,
   parsePilotSnapshot,
   parseRegisteredResponse,
+  parseStaticRegisteredResponse,
   parseStaticCredentialVerificationResponse,
+  type AwsStaticCredentialSecretReference,
   parseVerificationResponse,
 } from "./pilot-boundary";
 import type {
@@ -783,8 +785,8 @@ export async function registerCollectorConnection(input: {
 
 /**
  * Register a static-credential connection with the collector broker. The
- * credentials transit this single request and are stored (encrypted) only by
- * the broker; this process never persists or logs them.
+ * credentials transit this single request and are written to the broker-owned
+ * Secrets Manager boundary; this process never persists or logs them.
  */
 export async function registerCollectorStaticCredentialConnection(input: {
   readonly tenantId: string;
@@ -795,10 +797,9 @@ export async function registerCollectorStaticCredentialConnection(input: {
   readonly staticCredentials: {
     readonly accessKeyId: string;
     readonly secretAccessKey: string;
-    readonly sessionToken: string | null;
   };
-}): Promise<{ registered: true }> {
-  return parseRegisteredResponse(
+}): Promise<{ registered: true; secretReference: AwsStaticCredentialSecretReference }> {
+  return parseStaticRegisteredResponse(
     await brokerFetch<unknown>(`/v1/connections/${input.connectionId}`, "PUT", {
       tenantId: input.tenantId,
       connectionId: input.connectionId,
@@ -806,16 +807,10 @@ export async function registerCollectorStaticCredentialConnection(input: {
       partition: input.partition,
       enabledRegions: input.enabledRegions,
       credentialKind: "static_credentials",
-      staticCredentials: input.staticCredentials.sessionToken === null
-        ? {
-          accessKeyId: input.staticCredentials.accessKeyId,
-          secretAccessKey: input.staticCredentials.secretAccessKey,
-        }
-        : {
-          accessKeyId: input.staticCredentials.accessKeyId,
-          secretAccessKey: input.staticCredentials.secretAccessKey,
-          sessionToken: input.staticCredentials.sessionToken,
-        },
+      staticCredentials: {
+        accessKeyId: input.staticCredentials.accessKeyId,
+        secretAccessKey: input.staticCredentials.secretAccessKey,
+      },
     }),
   );
 }
@@ -824,6 +819,7 @@ export async function activateCollectorConnection(input: {
   readonly tenantId: string;
   readonly connectionId: string;
   readonly roleArn: string;
+  readonly secretVersionId?: string;
 }): Promise<void> {
   const response = await brokerFetch<unknown>(
     `/v1/connections/${input.connectionId}/activate`,
@@ -837,6 +833,7 @@ export async function discardStagedCollectorConnection(input: {
   readonly tenantId: string;
   readonly connectionId: string;
   readonly roleArn: string;
+  readonly secretVersionId?: string;
 }): Promise<void> {
   const response = await brokerFetch<unknown>(
     `/v1/connections/${input.connectionId}/discard`,
@@ -942,6 +939,7 @@ export async function verifyCollectorCredentialConnection(input: {
   readonly partition: AwsPartition;
   readonly callerIdentityArn: string;
   readonly accessKeyLast4: string;
+  readonly secretVersionId: string;
 }> {
   const payload = { tenantId: input.tenantId, connectionId: input.connectionId, jobId: input.jobId };
   return parseStaticCredentialVerificationResponse(

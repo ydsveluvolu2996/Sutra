@@ -22,9 +22,8 @@ comparison.
    read-only metadata policies (the same read-only intent as the role method's
    permission pack); Sutra cannot narrow static keys with a session policy, so
    the user's own policy is the effective ceiling.
-2. One access key on that user: a long-lived key (ID starting `AKIA`) or
-   temporary credentials (ID starting `ASIA`, which also require the session
-   token and expire on AWS's schedule).
+2. One long-lived access key on that user (ID starting `AKIA`). Temporary
+   `ASIA` session credentials are not accepted for this persistent connection.
 3. An approved Sutra customer-administrator profile with `customer:create` and
    `connection:manage` capabilities, and a live (non-fixture) collector.
 
@@ -38,17 +37,16 @@ comparison.
 2. Submit the form. Sutra creates the pending connection contract. No
    credentials accompany this create call and no browser draft stores them.
 3. In step 2 (Enter and register the customer access keys), enter:
-   - **Access key ID** — must match `AKIA` or `ASIA` followed by exactly 16
-     uppercase letters or digits.
+   - **Access key ID** — must match `AKIA` followed by exactly 16 uppercase
+     letters or digits.
    - **Secret access key** — exactly 40 characters.
-   - **Session token** — shown and required only when the access key ID starts
-     with `ASIA`.
    All inputs are masked (password fields) with browser autofill disabled, and
    the form clears itself on every submit, success or failure.
 4. Submit. The browser posts the keys once to
    `POST /api/pilot/connections/credentials`. The collector calls
    `sts:GetCallerIdentity`, requires the returned account to equal the
-   onboarding account, stores the keys encrypted, and queues the first
+   onboarding account and the principal to be a dedicated IAM user, then
+   promotes the exact staged AWS Secrets Manager version and queues the first
    collection job. The UI then shows the connection as validating/active with
    `Access key ····<last4>` — the only fragment ever displayed again.
 5. Step 3/4 behave as in the role flow: validate the account binding, run the
@@ -60,17 +58,23 @@ ExternalId handoff to recover with this method.
 
 ## Security properties
 
-- Keys are sent once over the authenticated onboarding session and stored
-  **encrypted, owned by the collector**. They are never logged, never placed in
-  sessionStorage or any browser persistence, never echoed back by any API, and
-  never rendered after submit.
+- Keys are sent once over the authenticated onboarding session and written to
+  a per-connection, versioned **AWS Secrets Manager** secret. The submitted
+  value is `SUTRAPENDING` until identity verification succeeds; only then does
+  the collector move `AWSCURRENT`. PostgreSQL and the encrypted collector
+  registry retain only the full secret ARN, exact VersionId and access-key
+  last four. Values are never logged, put in browser persistence, echoed by an
+  API, or rendered after submit.
 - **Account binding is proven on every session**: `GetCallerIdentity` must
   resolve the stored keys to the registered account before any collection
   starts; a mismatch fails closed.
-- Decrypted credentials live **in worker memory for at most 900 seconds** per
-  session and are never persisted outside the encrypted store.
-- Collection remains read-only metadata collection with the same evidence,
-  coverage, and audit semantics as the role method.
+- The collector retrieves both the exact VersionId and the required
+  `AWSCURRENT`/`SUTRAPENDING` stage immediately before use. Older,
+  `AWSPREVIOUS`, unlabeled, missing, malformed, cross-tenant, or wrong-account
+  values fail closed.
+- Sutra uses these credentials only for metadata collection, but unlike the
+  role method it cannot impose an STS session-policy ceiling. The customer IAM
+  user policy is the effective permission boundary.
 
 ## Limitations
 
@@ -85,16 +89,18 @@ ExternalId handoff to recover with this method.
 - **FinOps per-source verticals currently require the role method.** The
   FinOps CID dashboards attest per-source role policies and are not available
   to access-key connections.
-- Temporary `ASIA` credentials expire on AWS's schedule; collection stops
-  until fresh credentials are re-submitted.
+- Temporary `ASIA` session credentials are rejected because their expiry
+  cannot form a durable customer connection.
 
 ## Rotation
 
 1. Create a **new** access key on the same dedicated IAM user (an IAM user can
    hold two keys at once).
-2. Re-submit the new key ID and secret (and session token for `ASIA` keys)
+2. Re-submit the new AKIA key ID and secret
    through the same step-2 form (**Verify & rotate access keys**). Sutra
-   verifies the account binding again and replaces the stored encrypted keys.
+   stages a new Secrets Manager version and verifies it without replacing the
+   working `AWSCURRENT` version. Only a successful proof promotes the new
+   version; a failed proof discards only the candidate.
 3. After the next successful validation or sync, **deactivate, then delete**
    the old key in the AWS IAM console.
 
@@ -105,10 +111,11 @@ common baseline) and immediately after any suspected exposure.
 
 1. In `/onboard`, use **Offboard access keys** under Trust lifecycle. Confirm
    with the AWS account ID and a fresh authenticator code.
-2. Sutra removes its control-plane credential material and asks the collector
-   to erase the encrypted keys; CMDB snapshots and audit history remain. If the
-   collector is temporarily offline, restore it and use the reconcile action to
-   finish the idempotent cleanup.
+2. Sutra removes its control-plane reference and asks the collector to schedule
+   the exact Secrets Manager secret for deletion with a seven-day recovery
+   window; it is blocked from live use immediately. CMDB snapshots and audit
+   history remain. If the collector is temporarily offline, restore it and use
+   the reconcile action to finish the idempotent cleanup.
 3. Sutra cannot deactivate the keys in AWS. **Deactivate and delete the access
    key, and delete the dedicated IAM user**, in the AWS IAM console.
 4. Confirm in AWS CloudTrail that no further Sutra activity occurs from that

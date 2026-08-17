@@ -31,15 +31,22 @@ export async function stageVerifyThenCommitRole<TConnection, TVerification>(inpu
     verification: TVerification,
   ) => Promise<TConnection>;
   readonly activateCollector: () => Promise<unknown>;
+  readonly finalizeControlPlaneActivation?: (
+    connection: TConnection,
+  ) => Promise<TConnection>;
   readonly compensateStagedCollector: () => Promise<unknown>;
+  readonly onActivationFailure?: (error: unknown) => Promise<unknown>;
 }): Promise<VerifiedRoleRegistrationResult<TConnection, TVerification>> {
   let controlPlaneCommitted = false;
   try {
     await input.stageCollector();
     const verification = await input.verifyCollector();
-    const connection = await input.commitVerifiedControlPlaneRole(verification);
+    let connection = await input.commitVerifiedControlPlaneRole(verification);
     controlPlaneCommitted = true;
     await input.activateCollector();
+    if (input.finalizeControlPlaneActivation !== undefined) {
+      connection = await input.finalizeControlPlaneActivation(connection);
+    }
     return { connection, verification };
   } catch (error) {
     if (!controlPlaneCommitted) {
@@ -49,6 +56,13 @@ export async function stageVerifyThenCommitRole<TConnection, TVerification>(inpu
         // Preserve the candidate/commit error. A failed compensation leaves a
         // non-runnable staged candidate; a later registration retry can safely
         // reconcile it because no offboarding tombstone was written.
+      }
+    } else if (input.onActivationFailure !== undefined) {
+      try {
+        await input.onActivationFailure(error);
+      } catch {
+        // Preserve the activation error. The reconciliation marker must never
+        // hide the broker failure that left this exact version non-runnable.
       }
     }
     throw error;

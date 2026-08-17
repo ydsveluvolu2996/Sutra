@@ -30,8 +30,8 @@ test("the form is one card with the reference fields in the reference order", ()
     assert.ok(at > -1, `${field} must appear in the card, after ${order[order.indexOf(field) - 1] ?? "the start"}`);
     cursor = at;
   }
-  // Both authentication choices are visible, but static keys fail closed until
-  // their Secrets Manager storage boundary is deployed.
+  // Both authentication choices remain visible. Static keys are bound to the
+  // compile-time backend review and the deployment's exact runtime opt-in.
   assert.match(card, /IAM Role <em>Recommended<\/em>/u);
   assert.match(card, /Access &amp; Secret Keys/u);
   assert.match(card, /disabled=\{!staticCredentialsEnabled\}/u);

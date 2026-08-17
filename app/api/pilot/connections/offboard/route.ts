@@ -41,7 +41,8 @@ export async function POST(request: Request): Promise<Response> {
     // only the disabled status is. Trust-role connections keep the original
     // test, where offboarding is what clears the role ARN.
     const alreadyOffboarded = current.status === "disabled"
-      && (current.sourceKind === "aws_static_credentials" || current.roleArn === null);
+      && current.sourceKind === "aws_trust_role"
+      && current.roleArn === null;
     if (!alreadyOffboarded) requireRecentMfa(actor.authenticated);
     const result = await applyControlPlaneLifecycleThenReconcileCollector({
       transitionControlPlane: () => offboardAwsConnection(connectionId, actor.id, actor.orgId),
@@ -52,7 +53,8 @@ export async function POST(request: Request): Promise<Response> {
       offboarded: true,
       cmdbHistoryRetained: true,
       collectorCleanup: result.collectorCleanup,
-      customerIamRoleRevocationRequired: true,
+      customerIamRoleRevocationRequired: current.sourceKind === "aws_trust_role",
+      customerAccessKeyRevocationRequired: current.sourceKind === "aws_static_credentials",
     });
   } catch (error) {
     return errorResponse(error);

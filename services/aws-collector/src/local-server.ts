@@ -23,6 +23,8 @@ import {
   type RegisteredAwsConnection,
   type RegisterAwsConnectionInput,
 } from "./local-registry.js";
+import { AwsStaticCredentialSecretStore } from "./static-credential-secret-store.js";
+import type { StaticCredentialSecretReference } from "./static-credential-secret-store.js";
 import {
   DurableLocalScheduler,
   DurableLocalJobQueue,
@@ -265,9 +267,9 @@ const EXTERNAL_ID = /^[A-Za-z0-9_+=,.@:/-]{20,128}$/;
 const ROLE_PATH = /^\/sutra\/(?:[A-Za-z0-9_+=,.@-]+\/)*$/;
 const ROLE_NAME = /^[A-Za-z0-9_+=,.@-]{1,64}$/;
 const UNSAFE_ROLE_NAME = /(admin|poweruser|root|shared|operation|break[-_.]?glass)/iu;
-const STATIC_ACCESS_KEY_ID = /^(AKIA|ASIA)[A-Z0-9]{16}$/;
+const STATIC_ACCESS_KEY_ID = /^AKIA[A-Z0-9]{16}$/;
 const STATIC_SECRET_ACCESS_KEY = /^[A-Za-z0-9/+]{40}$/;
-const STATIC_SESSION_TOKEN = /^[A-Za-z0-9/+=_.-]{16,4096}$/u;
+const STATIC_SECRET_VERSION_ID = /^[A-Za-z0-9-]{32,64}$/u;
 const CONNECTION_PATH = /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})$/;
 const CONNECTION_ACTION_PATH =
   /^\/v1\/connections\/([A-Za-z0-9][A-Za-z0-9._:@+-]{0,127})\/(verify|activate|discard|sync|costs|utilization|security-events|finops-export-chunk|compute-optimizer-export-object-chunk|compute-optimizer-export-exact-describe|compute-optimizer-export-launch|compute-optimizer-materialization-activation-manifest|finops-source|organizations-taxonomy|disable|offboard)$/;
@@ -332,6 +334,7 @@ export interface LocalCollectorServerOptions {
   readonly sharedSecret?: string;
   readonly registryEncryptionKey?: string;
   readonly registryPath?: string;
+  readonly staticCredentialSecretStore?: AwsStaticCredentialSecretStore;
   readonly mode?: "fixture" | "live";
   readonly allowLiveAws?: boolean;
   readonly principalArn?: string;
@@ -526,6 +529,14 @@ export interface LocalCollectorServerOptions {
 
 export interface CollectorConnectionRegistry extends ScopedConnectionRegistry {
   getRegistered(scope: ConnectionScope, connectionId: string): Promise<RegisteredAwsConnection | null>;
+  getStaticCredentialCandidate?(
+    scope: ConnectionScope,
+    connectionId: string,
+  ): Promise<RegisteredAwsConnection | null>;
+  getStaticCredentialSecretReference?(
+    scope: ConnectionScope,
+    connectionId: string,
+  ): Promise<StaticCredentialSecretReference | null>;
   upsert(input: RegisterAwsConnectionInput): Promise<void>;
   markStaticCredentialVerified(
     scope: ConnectionScope,
@@ -534,8 +545,18 @@ export interface CollectorConnectionRegistry extends ScopedConnectionRegistry {
   ): Promise<void>;
   disable(scope: ConnectionScope, connectionId: string): Promise<void>;
   offboard(scope: ConnectionScope, connectionId: string): Promise<void>;
-  activateOnboarding(scope: ConnectionScope, connectionId: string, expectedRoleArn: string): Promise<void>;
-  discardStagedOnboarding(scope: ConnectionScope, connectionId: string, expectedRoleArn: string): Promise<void>;
+  activateOnboarding(
+    scope: ConnectionScope,
+    connectionId: string,
+    expectedRoleArn: string,
+    expectedSecretVersionId?: string,
+  ): Promise<void>;
+  discardStagedOnboarding(
+    scope: ConnectionScope,
+    connectionId: string,
+    expectedRoleArn: string,
+    expectedSecretVersionId?: string,
+  ): Promise<void>;
 }
 
 export interface CollectorRequestAuthenticator {
@@ -585,6 +606,7 @@ interface ServerContext {
   readonly mode: "fixture" | "live";
   readonly principalArn: string;
   readonly sourceAccountId: string;
+  readonly staticCredentialsReady: boolean;
   readonly now: () => Date;
   readonly registry: CollectorConnectionRegistry;
   readonly authenticator: CollectorRequestAuthenticator;
@@ -756,11 +778,15 @@ export function createLocalCollectorServer(options: LocalCollectorServerOptions)
     encryptionKey: options.registryEncryptionKey ??
       (() => { throw new Error("registryEncryptionKey is required"); })(),
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.staticCredentialSecretStore === undefined
+      ? {}
+      : { staticCredentialSecretStore: options.staticCredentialSecretStore }),
   });
   const context: ServerContext = {
     mode,
     principalArn,
     sourceAccountId: parsedPrincipal.accountId,
+    staticCredentialsReady: options.staticCredentialSecretStore !== undefined,
     now,
     registry,
     authenticator: options.authenticator ?? new RequestAuthenticator({
@@ -907,6 +933,10 @@ export async function startLocalCollectorServer(): Promise<Server> {
   const principalArn = process.env.SUTRA_COLLECTOR_PRINCIPAL_ARN?.trim();
   const mode = collectorMode(process.env.SUTRA_COLLECTOR_MODE);
   const allowLiveAws = exactBooleanEnvironment("SUTRA_ALLOW_LIVE_AWS", false);
+  const staticCredentialsEnabled = exactBooleanEnvironment(
+    "SUTRA_AWS_STATIC_KEYS_ENABLED",
+    false,
+  );
   if (mode === "live") {
     if (!allowLiveAws) {
       throw new Error(
@@ -918,6 +948,15 @@ export async function startLocalCollectorServer(): Promise<Server> {
     }
     await runSandboxIdentityPreflight(principalArn);
   }
+  if (staticCredentialsEnabled && (mode !== "live" || principalArn === undefined)) {
+    throw new Error("AWS static credentials require the explicitly enabled live collector");
+  }
+  const staticCredentialSecretStore = staticCredentialsEnabled
+    ? new AwsStaticCredentialSecretStore({
+        accountId: parseIamRoleArn(principalArn!).accountId,
+        region: requiredEnvironment("AWS_REGION"),
+      })
+    : undefined;
   const server = createLocalCollectorServer({
     sharedSecret: requiredEnvironment("SUTRA_BROKER_SHARED_SECRET"),
     registryEncryptionKey: requiredEnvironment("SUTRA_REGISTRY_ENCRYPTION_KEY"),
@@ -932,6 +971,7 @@ export async function startLocalCollectorServer(): Promise<Server> {
     awsSupportCasesEvidenceKey: decodeAwsSupportCasesEvidenceKey(
       requiredEnvironment("SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL"),
     ),
+    ...(staticCredentialSecretStore === undefined ? {} : { staticCredentialSecretStore }),
     ...(principalArn === undefined || principalArn.length === 0 ? {} : { principalArn }),
   });
   await new Promise<void>((resolve, reject) => {
@@ -1963,6 +2003,10 @@ async function route(
           version: "0.3.0-hosted",
           principalArn: context.principalArn,
           sourceAccountId: context.sourceAccountId,
+          staticCredentials: {
+            backend: "aws-secrets-manager-reference-v1",
+            ready: context.staticCredentialsReady,
+          },
           message: "Collector durable dependencies are unavailable.",
         },
       };
@@ -1975,6 +2019,10 @@ async function route(
         version: context.hostedRuntime ? "0.3.0-hosted" : "0.2.0-pilot",
         principalArn: context.principalArn,
         sourceAccountId: context.sourceAccountId,
+        staticCredentials: {
+          backend: "aws-secrets-manager-reference-v1",
+          ready: context.staticCredentialsReady,
+        },
         message:
           context.mode === "fixture"
             ? "Fixture collector ready; no AWS API calls will be made."
@@ -2166,12 +2214,26 @@ async function route(
     const operationKey = connectionOperationKey(input.tenantId, input.connectionId);
     const lease = await context.operationCoordinator.claim(operationKey);
     if (lease === null) throw new RegistryStateError();
+    let secretReference: StaticCredentialSecretReference | null = null;
     try {
       await context.registry.upsert(input);
+      if ("credentialKind" in input && input.credentialKind === "static_credentials"
+        && context.registry.getStaticCredentialSecretReference !== undefined) {
+        secretReference = await context.registry.getStaticCredentialSecretReference(
+          { tenantId: input.tenantId },
+          input.connectionId,
+        );
+      }
     } finally {
       await context.operationCoordinator.release(lease);
     }
-    return { status: 200, body: { registered: true } };
+    return {
+      status: 200,
+      body: {
+        registered: true,
+        ...(secretReference === null ? {} : { secretReference }),
+      },
+    };
   }
 
   const actionMatch = CONNECTION_ACTION_PATH.exec(path);
@@ -3112,7 +3174,16 @@ async function attestOnboardingTrust(context: ServerContext, job: ScopedJob): Pr
     const scope = { tenantId: job.tenantId };
     const registered = await context.registry.getRegistered(scope, job.connectionId);
     if (registered !== null && registered.credentialKind === "static_credentials") {
-      return await attestStaticCredentialIdentity(context, job, registered);
+      const candidate = context.registry.getStaticCredentialCandidate === undefined
+        ? registered
+        : await context.registry.getStaticCredentialCandidate(scope, job.connectionId);
+      if (candidate === null || candidate.credentialKind !== "static_credentials") {
+        throw new RegistryStateError();
+      }
+      const secretReference = context.registry.getStaticCredentialSecretReference === undefined
+        ? null
+        : await context.registry.getStaticCredentialSecretReference(scope, job.connectionId);
+      return await attestStaticCredentialIdentity(context, job, candidate, secretReference);
     }
     if (context.mode === "fixture") {
       const connection = await activeCandidate(context.registry, job);
@@ -3163,11 +3234,12 @@ async function attestStaticCredentialIdentity(
   context: ServerContext,
   job: ScopedJob,
   registered: RegisteredAwsConnection,
+  secretReference: StaticCredentialSecretReference | null,
 ): Promise<unknown> {
   const scope = { tenantId: job.tenantId };
   const staticCredentials = registered.staticCredentials;
   if (staticCredentials === undefined) throw new RegistryStateError();
-  const verification: StaticCredentialVerification = context.mode === "fixture"
+  const identityVerification: StaticCredentialVerification = context.mode === "fixture"
     ? {
         connectionId: registered.connectionId,
         accountId: registered.expectedAccountId,
@@ -3179,7 +3251,10 @@ async function attestStaticCredentialIdentity(
         registry: context.registry,
         principalArn: context.principalArn,
         region: partitionControlRegion(registered.partition),
-      }).verifyStaticCredentialIdentity(scope, job.connectionId, job.jobId);
+      }).verifyStaticCredentialCandidate(scope, registered, job.jobId);
+  const verification: StaticCredentialVerification = secretReference === null
+    ? identityVerification
+    : { ...identityVerification, secretVersionId: secretReference.versionId };
   await context.registry.markStaticCredentialVerified(scope, job.connectionId, verification);
   return {
     verified: true,
@@ -3188,6 +3263,9 @@ async function attestStaticCredentialIdentity(
     partition: verification.partition,
     callerIdentityArn: verification.callerIdentityArn,
     accessKeyLast4: verification.accessKeyLast4,
+    ...(verification.secretVersionId === undefined
+      ? {}
+      : { secretVersionId: verification.secretVersionId }),
   };
 }
 
@@ -3229,6 +3307,7 @@ async function mutateStagedRegistration(
     readonly tenantId: string;
     readonly connectionId: string;
     readonly roleArn: string;
+    readonly secretVersionId?: string;
   },
   action: "activate" | "discard",
 ): Promise<void> {
@@ -3241,12 +3320,14 @@ async function mutateStagedRegistration(
         scope,
         candidate.connectionId,
         candidate.roleArn,
+        candidate.secretVersionId,
       );
     } else {
       await context.registry.discardStagedOnboarding(
         scope,
         candidate.connectionId,
         candidate.roleArn,
+        candidate.secretVersionId,
       );
     }
   } finally {
@@ -4110,8 +4191,9 @@ function parseRegistration(body: string, pathConnectionId: string) {
  * Registration shape for customer-supplied static credentials. Role trust
  * material and role-contract fields are structurally impossible here; the
  * registry pins roleArn and externalId to empty strings so no AssumeRole path
- * can ever resolve this connection. The key material only transits into the
- * encrypted registry document and is never echoed or logged.
+ * can ever resolve this connection. In the reviewed live runtime, key material
+ * transits directly into a versioned Secrets Manager candidate and is never
+ * written to the encrypted metadata registry, echoed, or logged.
  */
 function parseStaticCredentialRegistration(body: string, pathConnectionId: string) {
   const record = exactJson(body, [
@@ -4135,22 +4217,13 @@ function parseStaticCredentialRegistration(body: string, pathConnectionId: strin
   }
   const credentialRecord = credentials as Record<string, unknown>;
   const credentialKeys = Object.keys(credentialRecord);
-  const hasSessionToken = Object.hasOwn(credentialRecord, "sessionToken");
   if (
-    credentialKeys.length !== (hasSessionToken ? 3 : 2) ||
+    credentialKeys.length !== 2 ||
     typeof credentialRecord.accessKeyId !== "string" ||
     !STATIC_ACCESS_KEY_ID.test(credentialRecord.accessKeyId) ||
     typeof credentialRecord.secretAccessKey !== "string" ||
-    !STATIC_SECRET_ACCESS_KEY.test(credentialRecord.secretAccessKey) ||
-    (hasSessionToken &&
-      (typeof credentialRecord.sessionToken !== "string" ||
-        !STATIC_SESSION_TOKEN.test(credentialRecord.sessionToken)))
+    !STATIC_SECRET_ACCESS_KEY.test(credentialRecord.secretAccessKey)
   ) {
-    throw invalidRequest();
-  }
-  // Temporary (ASIA) keys are unusable without their session token; long-term
-  // (AKIA) keys must not carry one.
-  if (credentialRecord.accessKeyId.startsWith("ASIA") !== hasSessionToken) {
     throw invalidRequest();
   }
   return {
@@ -4166,9 +4239,6 @@ function parseStaticCredentialRegistration(body: string, pathConnectionId: strin
     staticCredentials: {
       accessKeyId: credentialRecord.accessKeyId,
       secretAccessKey: credentialRecord.secretAccessKey,
-      ...(hasSessionToken
-        ? { sessionToken: credentialRecord.sessionToken as string }
-        : {}),
     },
   };
 }
@@ -4241,8 +4311,14 @@ function parseStagedRegistrationMutation(
   readonly tenantId: string;
   readonly connectionId: string;
   readonly roleArn: string;
+  readonly secretVersionId?: string;
 } {
-  const record = exactJson(body, ["tenantId", "connectionId", "roleArn"]);
+  let record: Record<string, unknown>;
+  try {
+    record = exactJson(body, ["tenantId", "connectionId", "roleArn"]);
+  } catch {
+    record = exactJson(body, ["tenantId", "connectionId", "roleArn", "secretVersionId"]);
+  }
   if (
     typeof record.tenantId !== "string" ||
     !IDENTIFIER.test(record.tenantId) ||
@@ -4256,16 +4332,24 @@ function parseStagedRegistrationMutation(
   // Static-credential candidates have no role: their lifecycle actions carry
   // an empty roleArn that must match the record's pinned empty string.
   if (record.roleArn !== "") {
+    if (Object.hasOwn(record, "secretVersionId")) throw invalidRequest();
     try {
       parseIamRoleArn(record.roleArn);
     } catch {
       throw invalidRequest();
     }
+  } else if (Object.hasOwn(record, "secretVersionId")
+    && (typeof record.secretVersionId !== "string"
+      || !STATIC_SECRET_VERSION_ID.test(record.secretVersionId))) {
+    throw invalidRequest();
   }
   return {
     tenantId: record.tenantId,
     connectionId: record.connectionId,
     roleArn: record.roleArn,
+    ...(typeof record.secretVersionId === "string"
+      ? { secretVersionId: record.secretVersionId }
+      : {}),
   };
 }
 

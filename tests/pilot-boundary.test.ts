@@ -4,6 +4,8 @@ import {
   computeSnapshotSha256,
   parseCollectorHealth,
   parsePilotSnapshot,
+  parseStaticRegisteredResponse,
+  parseStaticCredentialVerificationResponse,
   parseVerificationResponse,
 } from "../lib/pilot-boundary.ts";
 import { CUSTOMER_ROLE_METADATA_ACTIONS } from "../lib/aws-customer-role-artifacts.ts";
@@ -141,10 +143,60 @@ describe("collector boundary validation", () => {
       version: "0.1.0",
       principalArn: "arn:aws:iam::999988887777:role/SutraLocalCollector",
       sourceAccountId: "999988887777",
+      staticCredentials: {
+        backend: "aws-secrets-manager-reference-v1",
+        ready: false,
+      },
       message: "Fixture collector ready",
     }, "aws");
     assert.equal(health.principalArn, "arn:aws:iam::999988887777:role/SutraLocalCollector");
     assert.throws(() => parseCollectorHealth({ ...health }, "aws-us-gov"), /failed Sutra validation/u);
+  });
+
+  it("accepts only exact version-bound static credential references", () => {
+    const secretReference = {
+      secretArn: `arn:aws:secretsmanager:ap-south-1:738663485493:secret:sutra/customer-aws-credentials/v1/${"a".repeat(64)}/${"b".repeat(64)}-A1b2C3`,
+      versionId: "c".repeat(64),
+      accessKeyLast4: "Q4XY",
+    };
+    assert.deepEqual(parseStaticRegisteredResponse({ registered: true, secretReference }), {
+      registered: true,
+      secretReference,
+    });
+    assert.throws(
+      () => parseStaticRegisteredResponse({
+        registered: true,
+        secretReference: { ...secretReference, extra: "rejected" },
+      }),
+      /failed Sutra validation/u,
+    );
+    assert.throws(
+      () => parseStaticRegisteredResponse({
+        registered: true,
+        secretReference: { ...secretReference, secretArn: secretReference.secretArn.replace("/v1/", "/v2/") },
+      }),
+      /failed Sutra validation/u,
+    );
+    const verification = {
+      verified: true,
+      credentialKind: "static_credentials",
+      accountId: "123456789012",
+      partition: "aws",
+      callerIdentityArn: "arn:aws:iam::123456789012:user/sutra-reader",
+      accessKeyLast4: "Q4XY",
+      secretVersionId: secretReference.versionId,
+    } as const;
+    assert.deepEqual(parseStaticCredentialVerificationResponse(verification, {
+      accountId: verification.accountId,
+      partition: verification.partition,
+    }), verification);
+    assert.throws(
+      () => parseStaticCredentialVerificationResponse({
+        ...verification,
+        secretVersionId: "short",
+      }, { accountId: verification.accountId, partition: verification.partition }),
+      /failed Sutra validation/u,
+    );
   });
 
   it("accepts an account-bound, hash-valid snapshot", async () => {

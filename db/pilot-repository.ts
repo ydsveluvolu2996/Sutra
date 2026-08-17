@@ -45,6 +45,10 @@ export const CURRENT_PILOT_PERMISSION_PACK = PILOT_PERMISSION_PACK;
 const OFFBOARDED_EXTERNAL_ID_MARKER = "sutra-offboarded-no-trust-material-v1";
 const OFFBOARDED_KEY_VERSION = "offboarded";
 const AWS_OWNERSHIP_CONFLICT_MESSAGE = "The AWS ownership claim could not be accepted";
+const STATIC_CREDENTIAL_SECRET_ARN =
+  /^arn:aws:secretsmanager:[a-z]{2}(?:-[a-z0-9]+)+-\d:\d{12}:secret:(sutra\/customer-aws-credentials\/v1\/[a-f0-9]{64}\/[a-f0-9]{64})-[A-Za-z0-9]{6}$/u;
+const STATIC_CREDENTIAL_SECRET_VERSION = /^[A-Za-z0-9-]{32,64}$/u;
+const STATIC_CREDENTIAL_ACCESS_KEY_LAST4 = /^[A-Z0-9]{4}$/u;
 
 export class PilotRepositoryError extends Error {
   public readonly code: "NOT_FOUND" | "CONFLICT" | "INVALID_STATE" | "PERSISTENCE_FAILED";
@@ -96,6 +100,10 @@ export interface StoredConnectionSecret {
   readonly roleArn: string;
   readonly externalIdCiphertext: string;
   readonly externalIdKeyVersion: string;
+  /** Opaque non-secret reference; all three fields are present together. */
+  readonly credentialSecretArn: string | null;
+  readonly credentialSecretVersionId: string | null;
+  readonly credentialAccessKeyLast4: string | null;
   readonly enabledRegions: AwsRegionSelection;
   readonly status: ConnectionStatus;
   readonly permissionPackVersion: string;
@@ -140,6 +148,7 @@ export interface VerifiedStaticCredentialsEvidence {
   readonly partition: AwsPartition;
   readonly callerIdentityArn: string;
   readonly accessKeyLast4: string;
+  readonly secretVersionId: string;
 }
 
 export interface CommitVerifiedConnectionCredentialsInput {
@@ -147,6 +156,22 @@ export interface CommitVerifiedConnectionCredentialsInput {
   readonly connectionId: string;
   readonly actorId: string;
   readonly verification: VerifiedStaticCredentialsEvidence;
+  readonly secretReference: {
+    readonly secretArn: string;
+    readonly versionId: string;
+    readonly accessKeyLast4: string;
+  };
+}
+
+export interface ActivateVerifiedConnectionCredentialsInput {
+  readonly orgId?: string;
+  readonly connectionId: string;
+  readonly actorId: string;
+  readonly secretReference: {
+    readonly secretArn: string;
+    readonly versionId: string;
+    readonly accessKeyLast4: string;
+  };
 }
 
 interface ConnectionRow {
@@ -982,8 +1007,9 @@ export function commitVerifiedConnectionCredentials(
  * Mirrors {@link commitVerifiedConnectionRoleWithAtomicAudit}: the connection
  * mutation and its audit evidence land in one atomic batch, replays recover
  * through the audit idempotency key, and no credential value — access key,
- * secret, or session token — is EVER written to any database column. The only
- * credential derivative persisted is accessKeyLast4 inside audit metadata.
+ * secret, or session token — is EVER written to any database column. Only the
+ * collector-owned secret ARN/version pointer and the already-disclosed access
+ * key suffix are persisted.
  */
 async function commitVerifiedConnectionCredentialsWithAtomicAudit(
   input: CommitVerifiedConnectionCredentialsInput,
@@ -997,12 +1023,6 @@ async function commitVerifiedConnectionCredentialsWithAtomicAudit(
   if (current.status === "disabled") {
     throw new PilotRepositoryError("INVALID_STATE", "A disabled AWS connection cannot be changed");
   }
-  if (current.status === "validating") {
-    throw new PilotRepositoryError(
-      "INVALID_STATE",
-      "The AWS connection changed or has active work; retry credential registration after it settles",
-    );
-  }
   if (current.sourceKind !== "aws_static_credentials") {
     throw new PilotRepositoryError(
       "INVALID_STATE",
@@ -1015,16 +1035,34 @@ async function commitVerifiedConnectionCredentialsWithAtomicAudit(
     input.verification.accountId !== current.awsAccountId ||
     input.verification.partition !== current.partition ||
     !/^[A-Z0-9]{4}$/u.test(input.verification.accessKeyLast4) ||
+    !STATIC_CREDENTIAL_SECRET_VERSION.test(input.verification.secretVersionId) ||
     typeof input.verification.callerIdentityArn !== "string" ||
     input.verification.callerIdentityArn.length > 2_048 ||
     !new RegExp(
-      `^arn:${current.partition}:(?:iam|sts)::${current.awsAccountId}:[A-Za-z0-9_+=,.@/-]{1,512}$`,
+      `^arn:${current.partition}:iam::${current.awsAccountId}:user/[A-Za-z0-9_+=,.@/-]{1,512}$`,
       "u",
     ).test(input.verification.callerIdentityArn)
   ) {
     throw new PilotRepositoryError(
       "INVALID_STATE",
       "The collector credential proof is incomplete or does not match this AWS connection",
+    );
+  }
+  const secretReference = await parseStaticCredentialSecretReference(
+    input.secretReference,
+    orgId,
+    input.connectionId,
+  );
+  if (secretReference.accessKeyLast4 !== input.verification.accessKeyLast4) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The collector credential reference does not match its verification proof",
+    );
+  }
+  if (secretReference.versionId !== input.verification.secretVersionId) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The collector credential version does not match its verification proof",
     );
   }
   const now = nextMutationTimestamp(current);
@@ -1036,11 +1074,23 @@ async function commitVerifiedConnectionCredentialsWithAtomicAudit(
     actorId: input.actorId,
     accessKeyLast4: input.verification.accessKeyLast4,
     callerIdentityArn: input.verification.callerIdentityArn,
+    secretArn: secretReference.secretArn,
+    secretVersionId: secretReference.versionId,
+    // A validation claim or a retry after post-commit activation failure is a
+    // new audited operation even when it re-attests the same immutable secret
+    // version. Fully active exact replays deliberately retain null here so
+    // they recover the original audit without reopening validation.
+    retryState: current.status === "validating" || current.status === "needs_attention"
+      ? { status: current.status, updatedAt: current.updatedAt }
+      : null,
   }));
+  const isRevalidation = current.status === "validating";
   const audit = resolveAuditInput({
     orgId,
     actorId: input.actorId,
-    action: "aws.connection.credentials_registered",
+    action: isRevalidation
+      ? "aws.connection.credentials_validated"
+      : "aws.connection.credentials_registered",
     targetType: "aws_connection",
     targetId: input.connectionId,
     customerId: current.customerId,
@@ -1049,9 +1099,10 @@ async function commitVerifiedConnectionCredentialsWithAtomicAudit(
       credentialKind: "static_credentials",
       accessKeyLast4: input.verification.accessKeyLast4,
       callerIdentityArn: input.verification.callerIdentityArn,
+      credentialSecretVersionId: secretReference.versionId,
       credentialsStoredInControlPlane: false,
     },
-    requestId: `aws.connection.credentials_verified:${input.connectionId}:${credentialRegistrationRevision.slice(0, 32)}`,
+    requestId: `aws.connection.${isRevalidation ? "credentials_revalidated" : "credentials_verified"}:${input.connectionId}:${credentialRegistrationRevision.slice(0, 32)}`,
   });
   if (await connectionHasActiveWork(db, input.connectionId, orgId)) {
     throw new PilotRepositoryError(
@@ -1061,15 +1112,20 @@ async function commitVerifiedConnectionCredentialsWithAtomicAudit(
   }
   const mutation = db.prepare(
     `UPDATE aws_connections
-        SET status = 'active', last_validated_at = ?, updated_at = ?
+        SET credential_secret_arn = ?, credential_secret_version_id = ?,
+            credential_access_key_last4 = ?, status = 'validating',
+            last_validated_at = ?, updated_at = ?
       WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
-        AND status IN ('pending', 'active', 'needs_attention')
+        AND status IN ('pending', 'validating', 'active', 'needs_attention')
         AND role_arn = ''
         AND NOT EXISTS (
           SELECT 1 FROM sync_runs
            WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
         )`,
   ).bind(
+    secretReference.secretArn,
+    secretReference.versionId,
+    secretReference.accessKeyLast4,
     now,
     now,
     orgId,
@@ -1085,19 +1141,205 @@ async function commitVerifiedConnectionCredentialsWithAtomicAudit(
     mutationGuard: {
       sql: `SELECT 1 FROM aws_connections
              WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
-               AND role_arn = '' AND status = 'active'
+               AND role_arn = '' AND status = 'validating'
+               AND credential_secret_arn = ? AND credential_secret_version_id = ?
+               AND credential_access_key_last4 = ?
                AND last_validated_at = ? AND updated_at = ?`,
-      values: [orgId, input.connectionId, now, now],
+      values: [
+        orgId,
+        input.connectionId,
+        secretReference.secretArn,
+        secretReference.versionId,
+        secretReference.accessKeyLast4,
+        now,
+        now,
+      ],
     },
     committedState: {
       sql: `SELECT 1 FROM aws_connections
              WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
-               AND role_arn = '' AND status = 'active'
+               AND role_arn = '' AND status IN ('validating', 'active')
+               AND credential_secret_arn = ? AND credential_secret_version_id = ?
+               AND credential_access_key_last4 = ?
                AND last_validated_at IS NOT NULL`,
-      values: [orgId, input.connectionId],
+      values: [
+        orgId,
+        input.connectionId,
+        secretReference.secretArn,
+        secretReference.versionId,
+        secretReference.accessKeyLast4,
+      ],
     },
     persistenceMessage: "The verified static credentials and their audit evidence could not be committed atomically",
   });
+}
+
+/**
+ * Finalize static activation only after the collector has promoted and
+ * persisted the exact verified secret version. Until this second durable
+ * write succeeds the `validating` state blocks every sync path.
+ */
+export function activateVerifiedConnectionCredentials(
+  input: ActivateVerifiedConnectionCredentialsInput,
+): Promise<PilotConnection> {
+  return serializeAuditOperation(async () => {
+    const db = await readyDatabase();
+    const orgId = input.orgId ?? LOCAL_ORG_ID;
+    const current = await getConnectionForOrg(orgId, input.connectionId);
+    if (current === null) {
+      throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
+    }
+    if (current.sourceKind !== "aws_static_credentials") {
+      throw new PilotRepositoryError(
+        "INVALID_STATE",
+        "The verified AWS credential version is not awaiting activation",
+      );
+    }
+    const reference = await parseStaticCredentialSecretReference(
+      input.secretReference,
+      orgId,
+      input.connectionId,
+    );
+    const stored = await getStoredConnectionSecretForOrg(orgId, input.connectionId);
+    const exactStoredReference = stored.credentialSecretArn === reference.secretArn
+      && stored.credentialSecretVersionId === reference.versionId
+      && stored.credentialAccessKeyLast4 === reference.accessKeyLast4;
+    if (!exactStoredReference) {
+      throw new PilotRepositoryError(
+        "INVALID_STATE",
+        "The verified AWS credential version does not match the committed reference",
+      );
+    }
+    // A response retry after both activation writes preserves the already-live
+    // connection. The caller still continues through the collector's exact-
+    // version activation, which is independently idempotent.
+    if (current.status === "active") return current;
+    if (current.status !== "validating") {
+      throw new PilotRepositoryError(
+        "INVALID_STATE",
+        "The verified AWS credential version is not awaiting activation",
+      );
+    }
+    const now = nextMutationTimestamp(current);
+    const activationRevision = await sha256Hex(canonicalJson({
+      actorId: input.actorId,
+      secretVersionId: reference.versionId,
+      validatingStateAt: current.updatedAt,
+    }));
+    const audit = resolveAuditInput({
+      orgId,
+      actorId: input.actorId,
+      action: "aws.connection.credentials_activated",
+      targetType: "aws_connection",
+      targetId: input.connectionId,
+      customerId: current.customerId,
+      outcome: "allowed",
+      metadata: {
+        credentialKind: "static_credentials",
+        accessKeyLast4: reference.accessKeyLast4,
+        credentialSecretVersionId: reference.versionId,
+      },
+      requestId: `aws.connection.credentials_activated:${input.connectionId}:${activationRevision.slice(0, 32)}`,
+    });
+    const mutation = db.prepare(
+      `UPDATE aws_connections
+          SET status = 'active', updated_at = ?
+        WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
+          AND status = 'validating' AND role_arn = ''
+          AND credential_secret_arn = ? AND credential_secret_version_id = ?
+          AND credential_access_key_last4 = ?
+          AND NOT EXISTS (
+            SELECT 1 FROM sync_runs
+             WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
+          )`,
+    ).bind(
+      now,
+      orgId,
+      input.connectionId,
+      reference.secretArn,
+      reference.versionId,
+      reference.accessKeyLast4,
+      orgId,
+      input.connectionId,
+    );
+    return commitAuditedConnectionMutation({
+      db,
+      connectionId: input.connectionId,
+      mutation,
+      audit,
+      mutationGuard: {
+        sql: `SELECT 1 FROM aws_connections
+               WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
+                 AND status = 'active' AND role_arn = ''
+                 AND credential_secret_arn = ? AND credential_secret_version_id = ?
+                 AND credential_access_key_last4 = ? AND updated_at = ?`,
+        values: [
+          orgId,
+          input.connectionId,
+          reference.secretArn,
+          reference.versionId,
+          reference.accessKeyLast4,
+          now,
+        ],
+      },
+      committedState: {
+        sql: `SELECT 1 FROM aws_connections
+               WHERE org_id = ? AND id = ? AND source_kind = 'aws_static_credentials'
+                 AND status = 'active' AND role_arn = ''
+                 AND credential_secret_arn = ? AND credential_secret_version_id = ?
+                 AND credential_access_key_last4 = ?`,
+        values: [
+          orgId,
+          input.connectionId,
+          reference.secretArn,
+          reference.versionId,
+          reference.accessKeyLast4,
+        ],
+      },
+      persistenceMessage: "The verified static credential activation could not be committed atomically",
+    });
+  });
+}
+
+async function parseStaticCredentialSecretReference(
+  value: unknown,
+  orgId: string,
+  connectionId: string,
+): Promise<{
+  readonly secretArn: string;
+  readonly versionId: string;
+  readonly accessKeyLast4: string;
+}> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new PilotRepositoryError("INVALID_STATE", "The collector credential reference is invalid");
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    Object.keys(record).length !== 3 ||
+    !Object.hasOwn(record, "secretArn") ||
+    !Object.hasOwn(record, "versionId") ||
+    !Object.hasOwn(record, "accessKeyLast4") ||
+    typeof record.secretArn !== "string" ||
+    typeof record.versionId !== "string" ||
+    typeof record.accessKeyLast4 !== "string" ||
+    !STATIC_CREDENTIAL_SECRET_VERSION.test(record.versionId) ||
+    !STATIC_CREDENTIAL_ACCESS_KEY_LAST4.test(record.accessKeyLast4)
+  ) {
+    throw new PilotRepositoryError("INVALID_STATE", "The collector credential reference is invalid");
+  }
+  const match = STATIC_CREDENTIAL_SECRET_ARN.exec(record.secretArn);
+  const expectedName = `sutra/customer-aws-credentials/v1/${await sha256Hex(orgId)}/${await sha256Hex(connectionId)}`;
+  if (match?.[1] !== expectedName) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The collector credential reference does not belong to this AWS connection",
+    );
+  }
+  return {
+    secretArn: record.secretArn,
+    versionId: record.versionId,
+    accessKeyLast4: record.accessKeyLast4,
+  };
 }
 
 export function disableAwsConnection(
@@ -1134,7 +1376,8 @@ async function disableAwsConnectionWithAtomicAudit(
   const mutation = db.prepare(
     `UPDATE aws_connections
         SET status = 'disabled', updated_at = ?
-      WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+      WHERE org_id = ? AND id = ?
+        AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
         AND status IN ('pending', 'validating', 'active', 'needs_attention', 'disabled')
         AND NOT EXISTS (
           SELECT 1 FROM sync_runs
@@ -1148,13 +1391,15 @@ async function disableAwsConnectionWithAtomicAudit(
     audit,
     mutationGuard: {
       sql: `SELECT 1 FROM aws_connections
-             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+             WHERE org_id = ? AND id = ?
+               AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
                AND status = 'disabled' AND updated_at = ?`,
       values: [orgId, connectionId, now],
     },
     committedState: {
       sql: `SELECT 1 FROM aws_connections
-             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+             WHERE org_id = ? AND id = ?
+               AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
                AND status = 'disabled'`,
       values: [orgId, connectionId],
     },
@@ -1184,20 +1429,28 @@ async function offboardAwsConnectionWithAtomicAudit(
     throw new PilotRepositoryError("INVALID_STATE", "Simulated fixture connections use the simulation controls");
   }
   const lifecycle = await db.prepare(
-    `SELECT role_arn, external_id_ciphertext
+    `SELECT role_arn, external_id_ciphertext, credential_secret_arn,
+            credential_secret_version_id, credential_access_key_last4
        FROM aws_connections
-      WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+      WHERE org_id = ? AND id = ?
+        AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
       LIMIT 1`,
   ).bind(orgId, connectionId).first<{
     role_arn: string;
     external_id_ciphertext: string;
+    credential_secret_arn: string | null;
+    credential_secret_version_id: string | null;
+    credential_access_key_last4: string | null;
   }>();
   if (lifecycle === null) {
     throw new PilotRepositoryError("NOT_FOUND", "AWS connection not found");
   }
   if (
     lifecycle.role_arn.length === 0 &&
-    lifecycle.external_id_ciphertext === OFFBOARDED_EXTERNAL_ID_MARKER
+    lifecycle.external_id_ciphertext === OFFBOARDED_EXTERNAL_ID_MARKER &&
+    lifecycle.credential_secret_arn === null &&
+    lifecycle.credential_secret_version_id === null &&
+    lifecycle.credential_access_key_last4 === null
   ) {
     const audit = resolveConnectionOffboardedAudit(current, actorId, orgId);
     if (await auditRequestAlreadySatisfied(db, audit)) return current;
@@ -1214,8 +1467,11 @@ async function offboardAwsConnectionWithAtomicAudit(
   const mutation = db.prepare(
     `UPDATE aws_connections
         SET role_arn = '', external_id_ciphertext = ?, external_id_key_version = ?,
+            credential_secret_arn = NULL, credential_secret_version_id = NULL,
+            credential_access_key_last4 = NULL,
             status = 'disabled', updated_at = ?
-      WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+      WHERE org_id = ? AND id = ?
+        AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
         AND NOT EXISTS (
           SELECT 1 FROM sync_runs
            WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
@@ -1236,9 +1492,13 @@ async function offboardAwsConnectionWithAtomicAudit(
     audit,
     mutationGuard: {
       sql: `SELECT 1 FROM aws_connections
-             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+             WHERE org_id = ? AND id = ?
+               AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
                AND role_arn = '' AND external_id_ciphertext = ?
                AND external_id_key_version = ? AND status = 'disabled'
+               AND credential_secret_arn IS NULL
+               AND credential_secret_version_id IS NULL
+               AND credential_access_key_last4 IS NULL
                AND updated_at = ?`,
       values: [
         orgId,
@@ -1250,9 +1510,13 @@ async function offboardAwsConnectionWithAtomicAudit(
     },
     committedState: {
       sql: `SELECT 1 FROM aws_connections
-             WHERE org_id = ? AND id = ? AND source_kind = 'aws_trust_role'
+             WHERE org_id = ? AND id = ?
+               AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
                AND role_arn = '' AND external_id_ciphertext = ?
-               AND external_id_key_version = ? AND status = 'disabled'`,
+               AND external_id_key_version = ? AND status = 'disabled'
+               AND credential_secret_arn IS NULL
+               AND credential_secret_version_id IS NULL
+               AND credential_access_key_last4 IS NULL`,
       values: [
         orgId,
         connectionId,
@@ -1260,7 +1524,7 @@ async function offboardAwsConnectionWithAtomicAudit(
         OFFBOARDED_KEY_VERSION,
       ],
     },
-    persistenceMessage: "The offboarded trust state and its audit evidence could not be committed atomically",
+    persistenceMessage: "The offboarded AWS credential state and its audit evidence could not be committed atomically",
   });
 }
 
@@ -1300,7 +1564,8 @@ function resolveConnectionOffboardedAudit(
       partition: connection.partition,
       cmdbHistoryRetained: true,
       controlPlaneTrustMaterialRemoved: true,
-      customerIamRoleRevocationRequired: true,
+      customerIamRoleRevocationRequired: connection.sourceKind === "aws_trust_role",
+      customerAccessKeyRevocationRequired: connection.sourceKind === "aws_static_credentials",
     },
     requestId: `aws.connection.offboarded:${connection.id}`,
   });
@@ -1412,6 +1677,8 @@ export async function getStoredConnectionSecretForOrg(
   const row = await db.prepare(
     `SELECT id, customer_id, source_kind, partition, aws_account_id, role_arn,
             external_id_ciphertext, external_id_key_version,
+            credential_secret_arn, credential_secret_version_id,
+            credential_access_key_last4,
             enabled_regions_json, status, permission_pack_version,
             role_provisioning_mode, expected_role_path, expected_role_name,
             permission_capabilities_json
@@ -1427,6 +1694,9 @@ export async function getStoredConnectionSecretForOrg(
     role_arn: string;
     external_id_ciphertext: string;
     external_id_key_version: string;
+    credential_secret_arn: string | null;
+    credential_secret_version_id: string | null;
+    credential_access_key_last4: string | null;
     enabled_regions_json: string;
     status: ConnectionStatus;
     permission_pack_version: string;
@@ -1448,6 +1718,28 @@ export async function getStoredConnectionSecretForOrg(
   ) {
     throw new PilotRepositoryError("INVALID_STATE", "The AWS connection has been offboarded");
   }
+  const referenceValues = [
+    row.credential_secret_arn,
+    row.credential_secret_version_id,
+    row.credential_access_key_last4,
+  ];
+  const populatedReferenceValues = referenceValues.filter((value) => value !== null).length;
+  if (
+    (populatedReferenceValues !== 0 && populatedReferenceValues !== referenceValues.length) ||
+    (populatedReferenceValues !== 0 && row.source_kind !== "aws_static_credentials")
+  ) {
+    throw new PilotRepositoryError(
+      "INVALID_STATE",
+      "The stored AWS credential reference is incomplete or attached to the wrong connection kind",
+    );
+  }
+  const secretReference = populatedReferenceValues === 0
+    ? null
+    : await parseStaticCredentialSecretReference({
+      secretArn: row.credential_secret_arn,
+      versionId: row.credential_secret_version_id,
+      accessKeyLast4: row.credential_access_key_last4,
+    }, orgId, connectionId);
   return {
     connectionId: row.id,
     customerId: row.customer_id,
@@ -1457,6 +1749,9 @@ export async function getStoredConnectionSecretForOrg(
     roleArn: row.role_arn,
     externalIdCiphertext: row.external_id_ciphertext,
     externalIdKeyVersion: row.external_id_key_version,
+    credentialSecretArn: secretReference?.secretArn ?? null,
+    credentialSecretVersionId: secretReference?.versionId ?? null,
+    credentialAccessKeyLast4: secretReference?.accessKeyLast4 ?? null,
     enabledRegions: parseJson<string[]>(row.enabled_regions_json, []),
     status: row.status,
     permissionPackVersion: row.permission_pack_version,
@@ -1474,14 +1769,17 @@ export async function markConnectionValidating(
   orgId: string,
 ): Promise<void> {
   const db = await readyDatabase();
+  const now = Date.now();
   const result = await db.prepare(
-    `UPDATE aws_connections SET status = 'validating', updated_at = ?
+    `UPDATE aws_connections
+        SET status = 'validating',
+            updated_at = CASE WHEN updated_at >= ? THEN updated_at + 1 ELSE ? END
       WHERE org_id = ? AND id = ? AND status IN ('pending', 'needs_attention', 'active')
         AND NOT EXISTS (
           SELECT 1 FROM sync_runs
-           WHERE org_id = ? AND connection_id = ? AND status = 'running'
+           WHERE org_id = ? AND connection_id = ? AND status IN ('queued', 'running')
         )`,
-  ).bind(Date.now(), orgId, connectionId, orgId, connectionId).run();
+  ).bind(now, now, orgId, connectionId, orgId, connectionId).run();
   if ((result.meta?.changes ?? 0) !== 1) {
     throw new PilotRepositoryError("INVALID_STATE", "Connection is not ready for validation");
   }
@@ -1583,7 +1881,7 @@ export async function markConnectionNeedsAttention(
   const result = await db.prepare(
     `UPDATE aws_connections SET status = 'needs_attention', updated_at = ?
       WHERE org_id = ? AND id = ? AND status IN ('validating', 'active')`,
-  ).bind(Date.now(), orgId, connectionId).run();
+  ).bind(nextMutationTimestamp(connection), orgId, connectionId).run();
   if ((result.meta?.changes ?? 0) !== 1) return;
   await appendAuditEvent({
     orgId,
@@ -1723,7 +2021,8 @@ export async function createSyncRun(
             'aws-pilot-v1', '{}', ?, ?, ?
        FROM aws_connections c
       WHERE c.org_id = ? AND c.customer_id = ? AND c.id = ?
-        AND c.source_kind = 'aws_trust_role' AND c.status = 'active'
+        AND c.source_kind IN ('aws_trust_role', 'aws_static_credentials')
+        AND c.status = 'active'
         AND c.permission_pack_version = ?
         AND NOT EXISTS (
           SELECT 1 FROM sync_runs r

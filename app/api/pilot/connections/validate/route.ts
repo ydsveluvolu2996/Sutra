@@ -1,4 +1,6 @@
 import {
+  activateVerifiedConnectionCredentials,
+  commitVerifiedConnectionCredentials,
   getStoredConnectionSecretForOrg,
   markConnectionNeedsAttention,
   markConnectionValidated,
@@ -14,6 +16,7 @@ import {
   registerCollectorConnection,
   requirePilotActor,
   safeValidationFailureCode,
+  verifyCollectorCredentialConnection,
   verifyCollectorConnection,
 } from "../../../../../lib/pilot-server";
 import { assertSessionCapability } from "../../../../../lib/api-auth";
@@ -50,11 +53,61 @@ export async function POST(request: Request): Promise<Response> {
       assertAwsStaticCredentialsOnboardingEnabled();
     }
     const health = await getCollectorHealth(stored.partition);
-    if (health.mode !== "live") {
+    if (health.mode !== "live"
+      || (stored.sourceKind === "aws_static_credentials" && !health.staticCredentials.ready)) {
       throw Object.assign(new Error("AWS trust validation requires an explicitly enabled live collector"), { code: "INVALID_STATE" });
     }
     await markConnectionValidating(connectionId, actor.orgId);
     validationClaimed = true;
+    if (stored.sourceKind === "aws_static_credentials") {
+      if (
+        stored.credentialSecretArn === null ||
+        stored.credentialSecretVersionId === null ||
+        stored.credentialAccessKeyLast4 === null ||
+        health.sourceAccountId === null ||
+        stored.credentialSecretArn.split(":")[4] !== health.sourceAccountId
+      ) {
+        throw Object.assign(
+          new Error("Register the customer access key before validation"),
+          { code: "INVALID_STATE" },
+        );
+      }
+      const verification = await verifyCollectorCredentialConnection({
+        tenantId: actor.orgId,
+        connectionId,
+        jobId: `verify_creds_${crypto.randomUUID().replaceAll("-", "")}`,
+        accountId: stored.accountId,
+        partition: stored.partition,
+      });
+      await commitVerifiedConnectionCredentials({
+        orgId: actor.orgId,
+        connectionId,
+        actorId: actor.id,
+        verification,
+        secretReference: {
+          secretArn: stored.credentialSecretArn,
+          versionId: stored.credentialSecretVersionId,
+          accessKeyLast4: stored.credentialAccessKeyLast4,
+        },
+      });
+      await activateCollectorConnection({
+        tenantId: actor.orgId,
+        connectionId,
+        roleArn: "",
+        secretVersionId: stored.credentialSecretVersionId,
+      });
+      await activateVerifiedConnectionCredentials({
+        orgId: actor.orgId,
+        connectionId,
+        actorId: actor.id,
+        secretReference: {
+          secretArn: stored.credentialSecretArn,
+          versionId: stored.credentialSecretVersionId,
+          accessKeyLast4: stored.credentialAccessKeyLast4,
+        },
+      });
+      return jsonResponse({ verification, connectionId });
+    }
     if (!stored.roleArn) {
       throw Object.assign(new Error("Register the customer IAM role before validation"), { code: "INVALID_STATE" });
     }

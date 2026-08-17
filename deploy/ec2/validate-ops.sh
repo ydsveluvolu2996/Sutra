@@ -13,7 +13,8 @@ grep -Fxq '!deploy/ec2/.env.ec2.example' "$ROOT/.dockerignore" || {
 }
 
 bash -n "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
-  "$EC2/bootstrap.sh" "$EC2/redeploy.sh" "$EC2/release-update.sh"
+  "$EC2/bootstrap.sh" "$EC2/redeploy.sh" "$EC2/release-update.sh" \
+  "$EC2/sync-zoho-runtime.sh"
 [[ -x "$EC2/backup-prod.sh" && -x "$EC2/restore-prod.sh" && -x "$EC2/release-update.sh" ]]
 
 ruby -e '
@@ -26,7 +27,8 @@ ruby -e '
 python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
   "$EC2/release-update.sh" "$EC2/redeploy.sh" "$EC2/Caddyfile" \
   "$EC2/cloudflared-config.yml.example" "$EC2/maintenance/security.txt" \
-  "$EC2/compose.prod.yaml" "$EC2/.env.ec2.example" "$EC2/sutra.service" <<'PY'
+  "$EC2/compose.prod.yaml" "$EC2/.env.ec2.example" "$EC2/sutra.service" \
+  "$EC2/sync-zoho-runtime.sh" <<'PY'
 from pathlib import Path
 import sys
 
@@ -41,6 +43,7 @@ security_text = Path(sys.argv[8]).read_text(encoding="utf-8")
 compose = Path(sys.argv[9]).read_text(encoding="utf-8")
 env_template = Path(sys.argv[10]).read_text(encoding="utf-8")
 unit = Path(sys.argv[11]).read_text(encoding="utf-8")
+sync_runtime = Path(sys.argv[12]).read_text(encoding="utf-8")
 
 required_template = [
     "Default: t3a.large",
@@ -56,6 +59,19 @@ required_template = [
     "secret:sutra/notifications/*",
     "PolicyName: ReadOnlyExactZohoRuntimeSecret",
     "secret:sutra/runtime/zoho-*",
+    "PolicyName: ManageOnlySutraCustomerAwsCredentialSecrets",
+    "secretsmanager:CreateSecret",
+    "secretsmanager:DescribeSecret",
+    "secretsmanager:PutSecretValue",
+    "secretsmanager:UpdateSecretVersionStage",
+    "Sid: ReadOnlyCurrentOrPendingSutraCustomerCredentialVersion",
+    "secretsmanager:VersionStage:",
+    'secretsmanager:VersionId: "false"',
+    "- AWSCURRENT",
+    "- SUTRAPENDING",
+    "secretsmanager:DeleteSecret",
+    "secret:sutra/customer-aws-credentials/v1/*",
+    "secretsmanager:RecoveryWindowInDays: 7",
     "Condition: GrantNotificationEmailSending",
     'Action: ["ses:SendEmail", "ses:SendRawEmail"]',
     "Resource: { Ref: NotificationSesIdentityArn }",
@@ -98,10 +114,32 @@ prohibited_template = [
     "ses:*",
     "identity/*",
     "repository/sutra/*",
+    "secretsmanager:ListSecrets",
+    "secretsmanager:RestoreSecret",
+    "secretsmanager:ReplicateSecretToRegions",
+    "secretsmanager:PutResourcePolicy",
+    "secretsmanager:TagResource",
+    "secretsmanager:UntagResource",
 ]
 for fragment in prohibited_template:
     if fragment in template:
         raise SystemExit(f"Minimal-cost template unexpectedly contains: {fragment}")
+
+customer_secret_prefix = "secret:sutra/customer-aws-credentials/v1/*"
+if template.count(customer_secret_prefix) != 3:
+    raise SystemExit("Customer AWS credential permissions must use exactly three path-scoped resources")
+if template.count("Action: secretsmanager:DeleteSecret") != 1:
+    raise SystemExit("Customer AWS credential deletion must have one reviewed grant")
+delete_grant = template[template.index("Sid: ScheduleSutraCustomerAwsCredentialSecretDeletion"):]
+delete_grant = delete_grant[:delete_grant.index("- PolicyName:")]
+for fragment in (
+    "Action: secretsmanager:DeleteSecret",
+    customer_secret_prefix,
+    "NumericEquals:",
+    "secretsmanager:RecoveryWindowInDays: 7",
+):
+    if fragment not in delete_grant:
+        raise SystemExit(f"Recoverable customer credential deletion is missing: {fragment}")
 
 credentials = template.index(".sutra/cloudflared/credentials.json")
 bootstrap = template.index("bash deploy/ec2/bootstrap.sh")
@@ -261,11 +299,41 @@ if security_text != expected_security_text:
     raise SystemExit("Caddy fail-open security.txt differs from the reviewed canonical document")
 if "./maintenance:/srv/maintenance:ro" not in compose:
     raise SystemExit("Caddy's version-controlled security.txt directory is not mounted read-only")
+if compose.count('SUTRA_AWS_STATIC_KEYS_ENABLED: "${SUTRA_AWS_STATIC_KEYS_ENABLED:-false}"') != 1:
+    raise SystemExit("The live application must expose one fail-closed static-key emergency switch")
+env_lines = env_template.splitlines()
+if env_lines.count("SUTRA_AWS_STATIC_KEYS_ENABLED=false") != 1:
+    raise SystemExit(
+        "deploy/ec2/.env.ec2.example must persist one disabled static-key emergency switch"
+    )
+if "SUTRA_AWS_STATIC_KEYS_ENABLED=true" in env_lines:
+    raise SystemExit("The committed EC2 operator template must not enable static-key onboarding")
+for fragment in (
+    "The AWS static-key emergency switch was not preserved in the staged release.",
+    'export SUTRA_AWS_STATIC_KEYS_ENABLED="$staged_static_keys_enabled"',
+):
+    if fragment not in release_update:
+        raise SystemExit(f"Immutable release static-key switch persistence is missing: {fragment}")
+for fragment in (
+    'static_keys_enabled="${static_keys_enabled:-false}"',
+    'export SUTRA_AWS_STATIC_KEYS_ENABLED="$static_keys_enabled"',
+):
+    if fragment not in redeploy:
+        raise SystemExit(f"Redeploy static-key emergency switch handling is missing: {fragment}")
+if "SUTRA_AWS_STATIC_KEYS_ENABLED" in sync_runtime:
+    raise SystemExit(
+        "sync-zoho-runtime.sh must not read, write, or manage the operator-owned static-key switch"
+    )
+for fragment in (
+    "AWS_REGION: ${AWS_REGION:-ap-south-1}",
+    "AWS_DEFAULT_REGION: ${AWS_REGION:-ap-south-1}",
+):
+    if fragment not in compose:
+        raise SystemExit(f"Static-key Secrets Manager Region configuration is missing: {fragment}")
 
 # Real notification delivery must never become live merely by deploying the
 # committed template. Both switches ship off, the worker stays profile-gated,
 # and no immutable worker image is baked in.
-env_lines = env_template.splitlines()
 for required in ("SUTRA_NOTIFICATIONS_ENABLED=false", "COMPOSE_PROFILES="):
     if required not in env_lines:
         raise SystemExit(

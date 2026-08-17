@@ -340,7 +340,9 @@ export type AwsConnectionCredentialKind = "trust_role" | "static_credentials";
  * Customer-supplied static credential material. It exists only inside the
  * encrypted registry document and in-memory session construction; it is never
  * logged, never echoed by any route, and never persisted anywhere else.
- * A missing sessionToken means a long-term (AKIA) key; ASIA keys require one.
+ * The reviewed persistent path accepts only a long-term AKIA key from a
+ * dedicated IAM user. The optional token remains for decoding the disabled
+ * legacy hosted envelope and is rejected by every live onboarding boundary.
  */
 export interface AwsStaticCredentialMaterial {
   readonly accessKeyId: string;
@@ -515,6 +517,8 @@ export interface StaticCredentialVerification {
   readonly partition: AwsPartition;
   readonly callerIdentityArn: string;
   readonly accessKeyLast4: string;
+  /** Present for the Secrets Manager-backed path; absent only in legacy fixtures. */
+  readonly secretVersionId?: string;
 }
 
 export interface InventoryJobRequest {

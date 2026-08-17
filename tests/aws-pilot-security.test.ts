@@ -274,21 +274,13 @@ test("static credential submissions accept exactly one well-formed key pair", ()
 
   assert.deepEqual(
     parseAwsStaticCredentialsSubmission({ connectionId, accessKeyId: akiaKey, secretAccessKey: secret }),
-    { connectionId, accessKeyId: akiaKey, secretAccessKey: secret, sessionToken: null },
-  );
-  assert.deepEqual(
-    parseAwsStaticCredentialsSubmission({
-      connectionId,
-      accessKeyId: asiaKey,
-      secretAccessKey: secret,
-      sessionToken: token,
-    }),
-    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret, sessionToken: token },
+    { connectionId, accessKeyId: akiaKey, secretAccessKey: secret },
   );
 
   const invalidSubmissions: unknown[] = [
-    // ASIA without token / AKIA with token.
+    // Temporary credentials and any session token are rejected.
     { connectionId, accessKeyId: asiaKey, secretAccessKey: secret },
+    { connectionId, accessKeyId: asiaKey, secretAccessKey: secret, sessionToken: token },
     { connectionId, accessKeyId: akiaKey, secretAccessKey: secret, sessionToken: token },
     // Malformed connection id.
     { connectionId: "conn_short", accessKeyId: akiaKey, secretAccessKey: secret },
