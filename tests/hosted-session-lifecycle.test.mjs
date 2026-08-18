@@ -91,6 +91,12 @@ test("callback fails closed and clears the transaction cookie on any error", () 
   // Both the transaction cookie and the session cookie are marked so nothing
   // partial survives a failed sign-in.
   assert.match(callbackRoute, /append\("set-cookie", expiredOidcTransactionCookie\(\)\)/u);
+  // Production diagnostics identify only the bounded stage/provider/failure
+  // class. OAuth codes, URLs, cookies, tokens, identity claims and raw exception
+  // messages must never be written to logs.
+  assert.match(callbackRoute, /event: "sutra\.oidc\.callback\.failed"/u);
+  assert.match(callbackRoute, /stage,\s*providerId: providerId \?\? "unknown",\s*failureCode:/u);
+  assert.doesNotMatch(callbackRoute, /console\.error\([^\n]*(?:request\.url|sealed|idToken|identity|error\.message)/u);
 });
 
 test("first-login provisioning is deny-by-default: an uninvited identity cannot join a tenant", () => {

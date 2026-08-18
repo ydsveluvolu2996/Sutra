@@ -33,6 +33,7 @@ export interface OidcAuthorizationTransaction {
 }
 
 const PROVIDER_ID = /^[a-z][a-z0-9_-]{1,31}$/u;
+const OPAQUE_AUTHORIZATION_CODE = /^[\u0021-\u007e]{8,2048}$/u;
 
 function randomBytes(length: number): Uint8Array {
   const bytes = new Uint8Array(length);
@@ -212,6 +213,16 @@ function constantTimeEqual(left: string, right: string): boolean {
   return difference === 0;
 }
 
+/**
+ * OAuth authorization codes are opaque provider values, not base64url tokens.
+ * RFC 6749 permits visible ASCII and Google currently returns codes containing
+ * `/`. Keep only transport-safety and size bounds here; URLSearchParams safely
+ * re-encodes every accepted character for the token request body.
+ */
+function validAuthorizationCode(value: string): boolean {
+  return OPAQUE_AUTHORIZATION_CODE.test(value);
+}
+
 export function validateOidcCallback(
   callbackUrl: string,
   transaction: OidcAuthorizationTransaction,
@@ -221,7 +232,7 @@ export function validateOidcCallback(
   const code = url.searchParams.get("code") ?? "";
   const state = url.searchParams.get("state") ?? "";
   if (!constantTimeEqual(state, transaction.state)) throw new Error("OIDC callback state is invalid");
-  if (!/^[A-Za-z0-9._~-]{8,2048}$/u.test(code)) throw new Error("OIDC authorization code is invalid");
+  if (!validAuthorizationCode(code)) throw new Error("OIDC authorization code is invalid");
   return code;
 }
 
@@ -231,7 +242,7 @@ export function oidcTokenRequestBody(
   codeVerifier: string,
 ): URLSearchParams {
   validateOidcClientConfiguration(configuration);
-  if (!/^[A-Za-z0-9._~-]{8,2048}$/u.test(code)) throw new Error("OIDC authorization code is invalid");
+  if (!validAuthorizationCode(code)) throw new Error("OIDC authorization code is invalid");
   if (!/^[A-Za-z0-9_-]{43}$/u.test(codeVerifier)) throw new Error("OIDC PKCE verifier is invalid");
   return new URLSearchParams({
     grant_type: "authorization_code",
