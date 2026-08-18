@@ -155,7 +155,7 @@ test("ADD-03 returns and validates the frozen audit in every successful state", 
   ]);
   assert.equal(route.match(/jsonResponse\(/gu)?.length, 4);
   assert.equal(
-    route.match(/officialDefinition:GCP_CLOUD_INTELLIGENCE_OFFICIAL_DEFINITION/gu)?.length,
+    route.match(/officialDefinition:\s*GCP_CLOUD_INTELLIGENCE_OFFICIAL_DEFINITION/gu)?.length,
     4,
   );
   assert.match(dashboard, /function hasPinnedOfficialDefinition/u);

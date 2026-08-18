@@ -518,6 +518,48 @@ export class AgentlessScanRepository {
     }));
   }
 
+  /** Customer-facing debt view. Unlike the system sweeper above, this query
+   * carries both tenant dimensions so one assigned customer cannot observe
+   * another customer's AWS resource ids, regions, or cleanup failures. */
+  public async listOpenTeardownDebtForCustomer(
+    scope: AgentlessScope,
+    limit = MAX_LIST_ROWS,
+  ): Promise<readonly StoredTeardownDebt[]> {
+    this.assertScope(scope);
+    const db = await this.ready();
+    const rows = await db.prepare(
+      `SELECT id, customer_id, connection_id, run_id, resource_kind, resource_id, region,
+              account_scope, attempts, last_error, first_seen_at, last_attempt_at
+         FROM agentless_teardown_debt
+         WHERE org_id = ? AND customer_id = ? AND resolved_at IS NULL
+         ORDER BY first_seen_at ASC LIMIT ?`,
+    ).bind(scope.orgId, scope.customerId, Math.max(1, Math.min(MAX_LIST_ROWS, limit))).all<{
+      id: string; customer_id: string; connection_id: string; run_id: string;
+      resource_kind: string; resource_id: string; region: string; account_scope: string;
+      attempts: number; last_error: string | null;
+      first_seen_at: string | number; last_attempt_at: string | number;
+    }>();
+    return (rows.results ?? []).map((row) => ({
+      id: row.id, customerId: row.customer_id, connectionId: row.connection_id,
+      runId: row.run_id,
+      resourceKind:
+        row.resource_kind === "volume"
+          ? "volume"
+          : row.resource_kind === "instance"
+            ? "instance"
+            : "snapshot",
+      resourceId: row.resource_id,
+      region: row.region,
+      accountScope:
+        row.account_scope === "customer" || row.account_scope === "sutra-scan-account"
+          ? row.account_scope
+          : invalid(),
+      attempts: Number(row.attempts), lastError: row.last_error,
+      firstSeenAt: toIso(row.first_seen_at) as string,
+      lastAttemptAt: toIso(row.last_attempt_at) as string,
+    }));
+  }
+
   /** Mark debt settled — only ever called after the resource is proven gone. */
   public async resolveTeardownDebt(orgId: string, resourceId: string, now = Date.now()): Promise<boolean> {
     if (!IDENTIFIER.test(orgId) || !IDENTIFIER.test(resourceId)) invalid();

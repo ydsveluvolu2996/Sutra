@@ -5,6 +5,7 @@ import {
   shareWorkspaceName,
 } from "../../../../db/onboarding-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../lib/api-auth";
+import { assertSameOrigin } from "../../../../lib/aws-pilot-security";
 import { errorResponse, jsonResponse } from "../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -22,14 +23,15 @@ export async function GET(request: Request): Promise<Response> {
 /**
  * Records one onboarding choice: `{ goals: [...] }` or `{ workspaceName: "..." }`.
  *
- * Gated on `connection:manage` -- the same operator capability the flow's final
- * step requires -- so a viewer can see the strip but only a workspace operator
- * can steer it. Goals are a lens, never a permission.
+ * These are organization-wide choices (including renaming the workspace), so
+ * only an organization owner/admin may change them. Customer-scoped AWS admins
+ * may onboard their assigned account but cannot mutate master workspace state.
  */
 export async function PATCH(request: Request): Promise<Response> {
   try {
+    assertSameOrigin(request);
     const authenticated = await requireApiSession(request);
-    assertSessionCapability(authenticated, "connection:manage");
+    assertSessionCapability(authenticated, "membership:manage");
     let body: unknown;
     try {
       body = await request.json();

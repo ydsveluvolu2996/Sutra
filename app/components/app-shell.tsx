@@ -154,6 +154,9 @@ function AuthenticatedAppShell({
   readonly children: ReactNode;
   readonly session: PublicLocalSession;
 }) {
+  const capabilitySet = new Set(session.capabilities);
+  const canManageWorkspace = capabilitySet.has("membership:manage");
+  const canManageConnections = capabilitySet.has("connection:manage");
   // Progress is read for every workspace, because the connection gate below is
   // not a trial-only concern. Null progress renders nothing and gates nothing --
   // unknown is never presented as complete or incomplete, so a failed or
@@ -162,7 +165,8 @@ function AuthenticatedAppShell({
   const onboardingProgress = onboarding.progress;
   // The strip keeps guiding until all three steps are done, so a workspace that
   // connected but never named itself still sees what is left.
-  const onboardingGuiding = session.organization.plan === "trial"
+  const onboardingGuiding = canManageWorkspace
+    && session.organization.plan === "trial"
     && onboardingProgress !== null
     && !onboardingProgress.completed;
   // The hard gate is narrower, and deliberately not about the plan: a workspace
@@ -172,7 +176,9 @@ function AuthenticatedAppShell({
   // own dashboards for never having picked a goal, which is a far worse failure
   // than showing an empty room. Connection is the only step that changes
   // whether the rest of the product has anything to say.
-  const onboardingUnconnected = onboardingProgress !== null && !onboardingProgress.steps.connect;
+  const onboardingUnconnected = canManageConnections
+    && onboardingProgress !== null
+    && !onboardingProgress.steps.connect;
   const { state, health, loading } = usePilotState();
   // FinOps dashboard routes all declare `active="costs"`; the exact rail
   // destination is resolved from the path so the open dashboard is the one
@@ -201,7 +207,6 @@ function AuthenticatedAppShell({
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavToggleRef = useRef<HTMLButtonElement>(null);
   const mobileNavPanelRef = useRef<HTMLDivElement>(null);
-  const capabilitySet = new Set(session.capabilities);
   const allVisibleNav = visibleNavigation(capabilitySet);
   // Live nav filter: keep only groups with items whose label matches the query.
   const query = navQuery.trim().toLocaleLowerCase("en-US");
@@ -229,7 +234,7 @@ function AuthenticatedAppShell({
   const closeMobileNav = useCallback((returnFocus: boolean) => {
     setMobileNavOpen(false);
     if (returnFocus) mobileNavToggleRef.current?.focus();
-  }, []);
+  }, [setMobileNavOpen]);
 
   const setRail = useCallback((collapsed: boolean) => writeRailPreference(collapsed), []);
 
@@ -283,8 +288,8 @@ function AuthenticatedAppShell({
               Capability gating is untouched: this narrows presentation only,
               and every route stays server-authorized. */}
           <nav aria-label="Primary navigation" className="nav-groups nav-groups-onboarding">
-            <Link className="nav-item" href="/welcome#goals">Choose your goals</Link>
-            <Link className="nav-item" href="/welcome#name">Share the name</Link>
+            {canManageWorkspace ? <Link className="nav-item" href="/welcome#goals">Choose your goals</Link> : null}
+            {canManageWorkspace ? <Link className="nav-item" href="/welcome#name">Share the name</Link> : null}
             <Link
               aria-current={activeKey === "onboard" ? "page" : undefined}
               className="nav-item"
