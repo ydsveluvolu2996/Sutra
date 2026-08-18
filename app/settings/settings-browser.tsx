@@ -40,11 +40,13 @@ export function SettingsBrowser() {
 
   const canManageMembers = session.capabilities.includes("membership:manage");
   const canManageConnections = session.capabilities.includes("connection:manage");
+  const canManageSelectedAccount = canManageConnections && connectionId !== null;
+  const selectedAccount = state?.connection ?? null;
 
   return (
     <>
       <section className="page-heading">
-        <div><p className="eyebrow">Workspace</p><h1>Settings</h1><p className="page-subtitle">Manage your profile, security, workspace, and where Sutra sends evidence. Sutra shows only the settings this build actually supports.</p></div>
+        <div><p className="eyebrow">Your account</p><h1>Settings</h1><p className="page-subtitle">Profile and AWS settings are limited to your signed-in organization and the customer accounts assigned to you.</p></div>
       </section>
 
       <div className="settings-grid">
@@ -72,19 +74,31 @@ export function SettingsBrowser() {
           {signOutError ? <p className="page-alert page-alert-error" role="alert">{signOutError}</p> : null}
         </section>
 
-        <section className="panel settings-card">
-          <div className="panel-heading"><div><p className="eyebrow">Organization</p><h2>Workspace</h2></div></div>
-          <dl className="settings-list">
-            <div><dt>Name</dt><dd>{session.organization.name}</dd></div>
-            <div><dt>Identifier</dt><dd>{session.organization.slug}</dd></div>
-            <div><dt>Release</dt><dd><span className="settings-pill">Controlled enterprise release</span></dd></div>
-          </dl>
-        </section>
+        {canManageMembers ? (
+          <section className="panel settings-card">
+            <div className="panel-heading"><div><p className="eyebrow">Organization</p><h2>Workspace administration</h2></div></div>
+            <dl className="settings-list">
+              <div><dt>Name</dt><dd>{session.organization.name}</dd></div>
+              <div><dt>Identifier</dt><dd>{session.organization.slug}</dd></div>
+              <div><dt>Release</dt><dd><span className="settings-pill">Controlled enterprise release</span></dd></div>
+            </dl>
+          </section>
+        ) : (
+          <section className="panel settings-card">
+            <div className="panel-heading"><div><p className="eyebrow">AWS access</p><h2>Your assigned account</h2></div></div>
+            <dl className="settings-list">
+              <div><dt>Customer</dt><dd>{selectedAccount?.customerName ?? "No assigned AWS account"}</dd></div>
+              <div><dt>AWS account</dt><dd>{selectedAccount?.awsAccountId ?? "Not connected"}</dd></div>
+              <div><dt>Access</dt><dd><span className="settings-pill">{session.membership.scopeMode.replaceAll("_", " ")}</span></dd></div>
+            </dl>
+            <p className="panel-footnote">Organization-wide administration is not available to this account.</p>
+          </section>
+        )}
 
         <section className="panel settings-card">
           <div className="panel-heading"><div><p className="eyebrow">Delivery</p><h2>Notifications</h2></div></div>
-          <p>Configure the email, Slack, and Teams destinations Sutra uses for runtime cases and alerts, and review delivery health, retries, and the dead-letter queue.</p>
-          <div className="settings-actions"><Link className="button button-primary" href="/settings/notifications">Manage notification destinations</Link></div>
+          <p>Notification destinations are isolated to the selected customer account.</p>
+          <div className="settings-actions">{canManageSelectedAccount ? <Link className="button button-primary" href="/settings/notifications">Manage notification destinations</Link> : <span className="panel-footnote">No manageable AWS account is selected.</span>}</div>
         </section>
 
         <section className="panel settings-card">
@@ -101,9 +115,9 @@ export function SettingsBrowser() {
       {workspaceLoading ? <div className="loading-state" role="status"><span className="loading-spinner" />Loading selected workspace…</div> : null}
       <EnterpriseReadinessPanel connectionId={connectionId} />
       {canManageMembers ? <ScimConnectorsPanel /> : null}
-      <ApiTokensPanel connectionId={connectionId} />
-      <ItsmConnectorsPanel connectionId={connectionId} />
-      <GovernancePoliciesPanel connectionId={connectionId} />
+      {canManageSelectedAccount ? <ApiTokensPanel connectionId={connectionId} /> : null}
+      {canManageSelectedAccount ? <ItsmConnectorsPanel connectionId={connectionId} /> : null}
+      {canManageSelectedAccount ? <GovernancePoliciesPanel connectionId={connectionId} /> : null}
     </>
   );
 }

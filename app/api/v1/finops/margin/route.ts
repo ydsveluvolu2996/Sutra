@@ -1,14 +1,15 @@
 import { listConnectionsForOrg } from "../../../../../db/pilot-repository";
 import { FinopsWorkspaceRepository } from "../../../../../db/finops-workspace-repository";
 import { FinopsExternalCostRepository } from "../../../../../db/finops-external-cost-repository";
-import { CustomerMarginRepository } from "../../../../../db/customer-margin-repository";
+import { CustomerMarginRepository, type StoredCustomerMargin } from "../../../../../db/customer-margin-repository";
 import { buildShowback } from "../../../../../lib/finops-showback";
 import { buildShowbackInput } from "../../../../../lib/finops-showback-inputs";
 import { applyMargin, type CustomerCost, type MarginRate } from "../../../../../lib/finops-margin";
 import type { NormalizedCurLine } from "../../../../../lib/finops-cur";
 import { EXTERNAL_COST_DISCLAIMER } from "../../../../../lib/finops-external-cost";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
-import { authorize } from "../../../../../lib/auth-policy";
+import { authorize, type AuthorizationSubject, type Capability } from "../../../../../lib/auth-policy";
+import { assertSameOrigin } from "../../../../../lib/aws-pilot-security";
 import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,26 @@ const MICROS = /^\d{1,24}$/u;
 
 function badRequest(): never {
   throw Object.assign(new Error("The margin request is invalid"), { code: "INVALID_INPUT" });
+}
+
+async function listAuthorizedRates(
+  subject: AuthorizationSubject,
+  capability: Extract<Capability, "connection:read" | "connection:manage">,
+): Promise<readonly StoredCustomerMargin[]> {
+  const repository = new CustomerMarginRepository();
+  if (subject.scopeMode === "all_customers") return repository.list(subject.orgId);
+  const customerIds = [...new Set(subject.grants
+    .filter((grant) => authorize(subject, {
+      orgId: subject.orgId,
+      capability,
+      customerId: grant.customerId,
+    }).allowed)
+    .map((grant) => grant.customerId))];
+  const rates = await Promise.all(customerIds.map((customerId) => repository.get({
+    orgId: subject.orgId,
+    customerId,
+  })));
+  return rates.filter((rate): rate is NonNullable<typeof rate> => rate !== null);
 }
 
 /**
@@ -120,7 +141,7 @@ export async function GET(request: Request): Promise<Response> {
       }
     }
 
-    const rates: readonly MarginRate[] = (await new CustomerMarginRepository().list(orgId)).map((rate) => ({
+    const rates: readonly MarginRate[] = (await listAuthorizedRates(authenticated.subject, "connection:read")).map((rate) => ({
       customerId: rate.customerId,
       markupPercent: rate.markupPercent,
       monthlyFeeMicros: rate.monthlyFeeMicros,
@@ -148,6 +169,7 @@ export async function GET(request: Request): Promise<Response> {
 
 export async function PUT(request: Request): Promise<Response> {
   try {
+    assertSameOrigin(request);
     const body: unknown = await request.json().catch(() => null);
     if (typeof body !== "object" || body === null) badRequest();
     const { customerId, markupPercent, monthlyFeeMicros, currency } = body as {
@@ -165,7 +187,7 @@ export async function PUT(request: Request): Promise<Response> {
       { orgId: authenticated.subject.orgId, customerId },
       { customerId, markupPercent, monthlyFeeMicros, currency },
     );
-    return jsonResponse({ saved, rates: await new CustomerMarginRepository().list(authenticated.subject.orgId) });
+    return jsonResponse({ saved, rates: await listAuthorizedRates(authenticated.subject, "connection:manage") });
   } catch (error) {
     return errorResponse(error);
   }
@@ -173,13 +195,14 @@ export async function PUT(request: Request): Promise<Response> {
 
 export async function DELETE(request: Request): Promise<Response> {
   try {
+    assertSameOrigin(request);
     const url = new URL(request.url);
     const customerId = url.searchParams.get("customerId") ?? "";
     if (!IDENTIFIER.test(customerId)) badRequest();
     const authenticated = await requireApiSession(request);
     assertSessionCapability(authenticated, "connection:manage", customerId);
     const deleted = await new CustomerMarginRepository().delete({ orgId: authenticated.subject.orgId, customerId });
-    return jsonResponse({ deleted, rates: await new CustomerMarginRepository().list(authenticated.subject.orgId) });
+    return jsonResponse({ deleted, rates: await listAuthorizedRates(authenticated.subject, "connection:manage") });
   } catch (error) {
     return errorResponse(error);
   }

@@ -130,7 +130,7 @@ export async function GET(request: Request): Promise<Response> {
       return jsonResponse({
         run,
         findings: await repository.listFindings(scope, runId),
-        outstanding: await repository.listOpenTeardownDebt(orgId),
+        outstanding: await repository.listOpenTeardownDebtForCustomer(scope),
         readiness: await runtimeReadiness(),
       });
     }
@@ -143,7 +143,7 @@ export async function GET(request: Request): Promise<Response> {
       runs,
       // Snapshots Sutra created and cannot delete. Surfaced on the list view
       // because it is spend, and spend nobody looks at is spend that persists.
-      outstanding: await repository.listOpenTeardownDebt(orgId),
+      outstanding: await repository.listOpenTeardownDebtForCustomer(scope),
       readiness: await runtimeReadiness(),
       neverScanned: runs.length === 0,
     });

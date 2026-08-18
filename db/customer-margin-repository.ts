@@ -96,6 +96,21 @@ export class CustomerMarginRepository {
     return (rows.results ?? []).map(toStored);
   }
 
+  /**
+   * Read one customer's rate through the complete tenant boundary. Public API
+   * routes use this for assigned-customer sessions so an org-wide list is
+   * never loaded and filtered only after the database read.
+   */
+  public async get(scope: CustomerMarginScope): Promise<StoredCustomerMargin | null> {
+    if (!IDENTIFIER.test(scope.orgId) || !IDENTIFIER.test(scope.customerId)) invalid();
+    const db = await this.ready();
+    const row = await db.prepare(
+      `SELECT customer_id, markup_percent, monthly_fee_micros, currency, updated_at
+         FROM customer_margin WHERE org_id = ? AND customer_id = ?`,
+    ).bind(scope.orgId, scope.customerId).first<MarginRow>();
+    return row === null || row === undefined ? null : toStored(row);
+  }
+
   /** Insert or replace the margin rate for one owned customer. */
   public async upsert(scope: CustomerMarginScope, input: CustomerMarginInput, now = Date.now()): Promise<StoredCustomerMargin> {
     if (!IDENTIFIER.test(scope.orgId) || !IDENTIFIER.test(scope.customerId)) invalid();

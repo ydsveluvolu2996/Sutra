@@ -13,6 +13,7 @@
 import { getRawDb } from "./index";
 import { ensureRuntimeSchema } from "./runtime-migrations";
 import type { AuthorizationSubject } from "../lib/auth-policy";
+import { authorize } from "../lib/auth-policy";
 import { ONBOARDING_GOALS, type OnboardingGoal, type OnboardingProgress } from "../lib/onboarding-goals";
 
 export { ONBOARDING_GOALS } from "../lib/onboarding-goals";
@@ -60,13 +61,32 @@ function validatedGoals(goals: readonly string[]): readonly OnboardingGoal[] {
   return ONBOARDING_GOALS.filter((goal) => unique.includes(goal));
 }
 
-async function connectExists(db: D1Database, orgId: string): Promise<boolean> {
-  const row = await db.prepare(
-    `SELECT 1 AS present FROM aws_connections
-      WHERE org_id = ? AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
-      LIMIT 1`,
-  ).bind(orgId).first<{ present: number }>();
-  return row !== null;
+async function connectExists(db: D1Database, subject: AuthorizationSubject): Promise<boolean> {
+  if (subject.scopeMode === "all_customers") {
+    const row = await db.prepare(
+      `SELECT 1 AS present FROM aws_connections
+        WHERE org_id = ? AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
+        LIMIT 1`,
+    ).bind(subject.orgId).first<{ present: number }>();
+    return row !== null;
+  }
+  const readableCustomerIds = [...new Set(subject.grants
+    .filter((grant) => authorize(subject, {
+      orgId: subject.orgId,
+      capability: "connection:read",
+      customerId: grant.customerId,
+    }).allowed)
+    .map((grant) => grant.customerId))];
+  for (const customerId of readableCustomerIds) {
+    const row = await db.prepare(
+      `SELECT 1 AS present FROM aws_connections
+        WHERE org_id = ? AND customer_id = ?
+          AND source_kind IN ('aws_trust_role', 'aws_static_credentials')
+        LIMIT 1`,
+    ).bind(subject.orgId, customerId).first<{ present: number }>();
+    if (row !== null) return true;
+  }
+  return false;
 }
 
 export async function getOnboardingProgress(
@@ -78,7 +98,7 @@ export async function getOnboardingProgress(
     `SELECT goals_json, name_shared_at FROM organization_onboarding WHERE org_id = ?`,
   ).bind(subject.orgId).first<{ goals_json: string; name_shared_at: number | null }>();
   const goals = row === null ? [] : parseGoals(row.goals_json);
-  const connect = await connectExists(db, subject.orgId);
+  const connect = await connectExists(db, subject);
   const steps = {
     goals: goals.length > 0,
     name: row !== null && row.name_shared_at !== null,

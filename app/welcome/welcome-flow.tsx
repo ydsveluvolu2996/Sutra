@@ -90,6 +90,7 @@ export function WelcomeFlow() {
   // so the strip's back-links work and saving a step does not yank them
   // forward before they have read the result.
   const [requestedStep, setRequestedStep] = useState<WelcomeStep | null>(null);
+  const canManageWorkspace = sessionView.session?.capabilities.includes("membership:manage") ?? false;
 
   useEffect(() => {
     let current = true;
@@ -112,7 +113,7 @@ export function WelcomeFlow() {
     return () => window.removeEventListener("hashchange", apply);
   }, []);
 
-  const step = requestedStep ?? firstIncompleteStep(progress);
+  const step = canManageWorkspace ? requestedStep ?? firstIncompleteStep(progress) : "connect";
   const shownName = workspaceName ?? sessionView.session?.organization.name ?? "";
 
   const goToStep = useCallback((next: WelcomeStep) => {
@@ -226,7 +227,7 @@ export function WelcomeFlow() {
           ) : null}
           <ConnectProviderGrid heading="Connect your infrastructure to track every asset, everywhere" />
           <div className="welcome-step-actions">
-            <button className="button button-secondary" onClick={() => goToStep("name")} type="button">Back</button>
+            {canManageWorkspace ? <button className="button button-secondary" onClick={() => goToStep("name")} type="button">Back</button> : null}
           </div>
         </section>
       ) : null}
