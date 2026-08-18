@@ -41,8 +41,11 @@ test("one step is on screen at a time, and the strip's hash selects which", () =
   for (const step of ["goals", "name", "connect"]) {
     assert.match(flow, new RegExp(`step === "${step}" \\?`, "u"));
   }
-  // The step shown follows progress unless the customer navigated explicitly.
-  assert.match(flow, /const step = requestedStep \?\? firstIncompleteStep\(progress\)/u);
+  // Workspace managers follow progress or an explicit hash. Customer-scoped
+  // users cannot use a hash to enter organization-wide goal/name settings.
+  assert.match(flow, /const canManageWorkspace = sessionView\.session\?\.capabilities\.includes\("membership:manage"\) \?\? false/u);
+  assert.match(flow, /const step = canManageWorkspace \? requestedStep \?\? firstIncompleteStep\(progress\) : "connect"/u);
+  assert.match(flow, /\{canManageWorkspace \? <button className="button button-secondary" onClick=\{\(\) => goToStep\("name"\)\} type="button">Back<\/button> : null\}/u);
   assert.match(flow, /addEventListener\("hashchange", apply\)/u);
 });
 
