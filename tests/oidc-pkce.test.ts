@@ -74,6 +74,22 @@ test("callback requires exact state and creates a bounded token request", async 
   assert.throws(() => validateOidcCallback(callback.toString(), transaction));
 });
 
+test("Google-style opaque authorization codes survive callback validation and form encoding", async () => {
+  const { transaction } = await createOidcAuthorization(configuration, "google", "/dashboard", 3_250_000);
+  // Synthetic representative shape only. Google authorization codes are opaque
+  // visible-ASCII values and commonly contain `/`; they are not base64url.
+  const googleStyleCode = "4/0Synthetic.Google-OAuth_code~value+with=punctuation";
+  const callback = new URL(configuration.redirectUri);
+  callback.searchParams.set("code", googleStyleCode);
+  callback.searchParams.set("state", transaction.state);
+  const code = validateOidcCallback(callback.toString(), transaction);
+  assert.equal(code, googleStyleCode);
+  assert.equal(
+    oidcTokenRequestBody(configuration, code, transaction.codeVerifier).get("code"),
+    googleStyleCode,
+  );
+});
+
 test("callback rejects a missing state, a missing/malformed code, and an IdP error", async () => {
   const { transaction } = await createOidcAuthorization(configuration, "google", "/dashboard", 3_500_000);
   // A code with no state (or a blank state) can never satisfy the constant-time
@@ -86,6 +102,17 @@ test("callback rejects a missing state, a missing/malformed code, and an IdP err
   noCode.searchParams.set("state", transaction.state);
   assert.throws(() => validateOidcCallback(noCode.toString(), transaction));
   noCode.searchParams.set("code", "x");
+  assert.throws(() => validateOidcCallback(noCode.toString(), transaction));
+  for (const malformed of [
+    "contains decoded space",
+    "contains\nnewline",
+    "contains\u007fdelete",
+    "contains-non-ascii-\u00e9",
+  ]) {
+    noCode.searchParams.set("code", malformed);
+    assert.throws(() => validateOidcCallback(noCode.toString(), transaction));
+  }
+  noCode.searchParams.set("code", "x".repeat(2049));
   assert.throws(() => validateOidcCallback(noCode.toString(), transaction));
   // An IdP-reported error aborts even when a state is echoed back.
   const errored = new URL(configuration.redirectUri);
