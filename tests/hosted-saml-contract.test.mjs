@@ -32,7 +32,8 @@ test("SAML starts only through a sealed request-bound transaction and is surface
   assert.match(start, /createSamlAuthorizationUrl/u);
   assert.match(login, /\/api\/auth\/federation/u);
   assert.match(login, /signed, tenant-bound assertion/u);
-  assert.match(login, /administrator-provisioned membership required/u);
+  assert.match(login, /Only verified, pre-provisioned memberships can continue/u);
+  assert.match(login, /membership approval is required/u);
 });
 
 test("SAML assertion replay storage is durable and registered in both databases", () => {

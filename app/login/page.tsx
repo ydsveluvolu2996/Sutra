@@ -266,10 +266,14 @@ export default function LoginPage() {
         <div className="auth-grid" aria-hidden="true" />
         <Link className="auth-brand" href="/" aria-label="Sutra home">
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
-          <span><strong>Sutra</strong><small>Cloud security, woven together</small></span>
+          <span><strong>Sutra</strong><small>Cloud management platform</small></span>
         </Link>
         <div className="auth-brand-copy">
-          <span className="auth-eyebrow">EKS-first CNAPP for managed service providers</span>
+          <span className="auth-eyebrow">Built for modern cloud operations</span>
+          <h1>See your cloud estate as one connected system.</h1>
+          <p className="auth-brand-lede">
+            Inventory, security, cost, and access context—woven into one evidence-backed workspace.
+          </p>
           <LoginShowcase />
         </div>
         <ul className="auth-assurances" aria-label="Security properties">
@@ -286,6 +290,10 @@ export default function LoginPage() {
 
       <section className="auth-form-panel">
         <div className="auth-form-card">
+          <div className="auth-card-badge">
+            <span aria-hidden="true">◆</span>
+            Secure workspace access
+          </div>
           {waiting ? (
             <div className="auth-loading" role="status">
               <span className="auth-spinner" aria-hidden="true" />
@@ -297,28 +305,35 @@ export default function LoginPage() {
               <div className="auth-heading">
                 {federation !== null && !federation.invitationOnly ? (
                   <>
-                    <span>Welcome to Sutra</span>
-                    <h2>Sign in</h2>
-                    <p>Continue with your identity provider. First time here? Signing in creates your own Sutra workspace on a free trial — no credit card, read-only cloud permissions.</p>
+                    <span>Sutra cloud workspace</span>
+                    <h2>Sign in to Sutra</h2>
+                    <p>Continue with your work account. New to Sutra? Your first sign-in creates a free workspace with read-only cloud access.</p>
                   </>
                 ) : (
                   <>
                     <span>Enterprise identity</span>
-                    <h2>Sign in</h2>
-                    <p>Continue through an identity provider configured by your organization. Sutra accepts only verified, pre-provisioned memberships.</p>
+                    <h2>Sign in to Sutra</h2>
+                    <p>Use an identity provider approved by your organization. Only verified, pre-provisioned memberships can continue.</p>
                   </>
                 )}
               </div>
-              {federation?.providers.map((provider, index) => (
-                <a
-                  className={`button ${index === 0 ? "button-primary" : "button-secondary"} auth-submit`}
-                  href={federationHref(provider)}
-                  key={`${provider.kind}:${provider.id}`}
-                >
-                  <FederationMark provider={provider} />
-                  Continue with {provider.label}
-                </a>
-              ))}
+              <div className="auth-provider-list">
+                {federation?.providers.map((provider, index) => (
+                  <div className="auth-provider-option" key={`${provider.kind}:${provider.id}`}>
+                    {index === 1 ? (
+                      <div className="auth-provider-divider"><span>Other enterprise options</span></div>
+                    ) : null}
+                    <a
+                      className={`button auth-submit auth-provider-action ${index === 0 ? "auth-provider-primary" : "auth-provider-secondary"}`}
+                      href={federationHref(provider)}
+                    >
+                      <FederationMark provider={provider} />
+                      <span>Continue with {provider.label}</span>
+                      {index === 0 ? <span className="auth-provider-arrow" aria-hidden="true">→</span> : null}
+                    </a>
+                  </div>
+                ))}
+              </div>
               {error ? <p className="auth-error" role="alert">{error}</p> : null}
               {federation?.saml ? (
                 <p className="auth-help">Enterprise SAML requires a signed, tenant-bound assertion from the configured IdP.</p>
@@ -424,14 +439,19 @@ export default function LoginPage() {
               </form>
             </>
           )}
-          <p className="auth-local-note">
-            <span aria-hidden="true">●</span>
-            {mode === "hosted"
-              ? ` Enterprise identity · ${federation?.invitationOnly === false ? "administrator or policy provisioned" : "administrator-provisioned membership required"}`
-              : identityMode === "password"
-                ? " Managed sign-in · password + mandatory MFA, membership provisioned by your operator"
-                : " Organization-managed access · external sign-in is disabled"}
-          </p>
+          <div className="auth-card-footer">
+            <span className="auth-status-mark" aria-hidden="true">✓</span>
+            <p>
+              <strong>{mode === "hosted" ? "Provider-managed sign-in" : "Protected workspace access"}</strong>
+              <small>
+                {mode === "hosted"
+                  ? `Your password stays with your identity provider · ${federation?.invitationOnly === false ? "new workspaces are policy provisioned" : "membership approval is required"}`
+                  : identityMode === "password"
+                    ? "Password and mandatory MFA · membership provisioned by your operator"
+                    : "Organization-managed access · external sign-in is disabled"}
+              </small>
+            </p>
+          </div>
         </div>
       </section>
     </main>
