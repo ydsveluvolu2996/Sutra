@@ -123,7 +123,7 @@ export async function runResilienceVueProviderRoute(input: {
   const capture = await collectResilienceVueProviderEvidence({ request,
     client: (dependencies.clientFactory ?? createResilienceVueProviderClient)({ region: request.scope.region, partition: request.scope.partition,
       credentials: session.credentials }), signal: input.signal });
-  return Object.freeze({ schemaVersion: "sutra.resilience-vue-broker-response.v1",
+  return Object.freeze({ schemaVersion: "sutra.resilience-vue-broker-response.v1" as const,
     requestId: request.requestId,
     requestBodySha256: createHash("sha256").update(input.body, "utf8").digest("hex"), capture });
 }

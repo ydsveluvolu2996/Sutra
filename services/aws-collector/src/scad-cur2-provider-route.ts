@@ -58,6 +58,6 @@ export async function runScadCur2ProviderRoute(input: { readonly body: string;
   const payload = await runScadCur2ProviderOperation({ request, binding, credentials: session.credentials,
     reader: dependencies.readerFactory({ credentials: session.credentials, partition: session.partition,
       region: binding.region }), signal });
-  return Object.freeze({ schemaVersion: "sutra.scad-cur2-provider-response.v1", requestId: request.requestId,
+  return Object.freeze({ schemaVersion: "sutra.scad-cur2-provider-response.v1" as const, requestId: request.requestId,
     requestBodySha256: createHash("sha256").update(input.body, "utf8").digest("hex"), payload });
 }

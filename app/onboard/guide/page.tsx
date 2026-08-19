@@ -1,3 +1,13 @@
+/* eslint-disable @next/next/no-img-element -- These four documentation
+   screenshots are served as plain <img> deliberately, not by oversight.
+   `next/image` needs the `/_next/image` optimizer route at runtime; this
+   application is served by vinext, which ships no such route, and nothing else
+   in this codebase imports `next/image` or configures an `images` loader.
+   Swapping these for <Image> would trade a performance hint for four broken
+   images in production. They are fixed-size 1600x1000 WebP assets committed to
+   this repository, already compressed, and sized by `.onboard-guide-shot`, so
+   the rule's bandwidth concern does not apply. Revisit if the runtime ever
+   gains an image optimizer. */
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AppShell } from "../../components/app-shell";
