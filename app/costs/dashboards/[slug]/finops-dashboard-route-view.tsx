@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useRouter } from "next/navigation";
 import type {
   FinopsDashboardCatalogEntry,
   FinopsSharedAnalysisSection,
@@ -27,15 +28,19 @@ export function FinopsDashboardRouteView({
 }) {
   const { state, loading, error } = usePilotState();
   const connectionId = state?.connection?.id ?? null;
+  const router = useRouter();
   const view = getFinopsDashboardView(dashboard.id);
 
   /**
    * Concern-based analysis lives on the workspace page. Deep-link into it rather
    * than duplicating those panels here, so there is one implementation of each.
    */
+  // Client-side navigation, not a full document load: `window.location.href`
+  // discarded the router state and re-fetched the whole app to move between two
+  // pages of the same workspace. Next 16.3 lints for this directly.
   const openSharedAnalysis = useCallback((section: FinopsSharedAnalysisSection) => {
-    if (typeof window !== "undefined") window.location.href = `/costs#finops-${section}`;
-  }, []);
+    router.push(`/costs#finops-${section}`);
+  }, [router]);
 
   if (loading && connectionId === null && error === null) {
     return (

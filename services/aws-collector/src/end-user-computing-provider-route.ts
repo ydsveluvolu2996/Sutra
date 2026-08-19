@@ -105,6 +105,6 @@ export async function runEndUserComputingProviderRoute(input:{readonly body:stri
       const assumed=await session;if(assumed.accountId!==accountId||assumed.partition!==partition)fail();
       return dependencies.readerFactory({credentials:assumed.credentials,accountId,partition,region});
     }});
-  return Object.freeze({schemaVersion:"sutra.end-user-computing-runtime-response.v1",requestId:request.requestId,
+  return Object.freeze({schemaVersion:"sutra.end-user-computing-runtime-response.v1" as const,requestId:request.requestId,
     requestBodySha256:createHash("sha256").update(input.body,"utf8").digest("hex"),capture});
 }
