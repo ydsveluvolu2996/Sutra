@@ -13,13 +13,16 @@ The fast release path is instead:
 
 ```text
 reviewed main commit
+  -> newest exact-SHA CI result must be successful
   -> manual GitHub Actions release
+  -> dispatch SHA must still equal the reviewed main SHA
   -> short-lived GitHub OIDC session (no AWS keys)
   -> immutable ECR candidate + exact-digest Trivy gate
   -> promote the same OCI manifest to a retained sha-* tag
   -> SSM command to one exact EC2 instance
+  -> mandatory Secrets Manager runtime refresh
   -> transactional release-update.sh + automatic failure rollback
-  -> public health, login and status checks
+  -> public health, Google/Zoho OIDC, login and status checks
 ```
 
 This removes laptop builds, source copies, SSH and server-side compilation from
@@ -155,10 +158,14 @@ serialized. From an authenticated checkout, the normal entrypoint is:
 pnpm deploy:ec2 -- "Approved reason for this production release"
 ```
 
-The helper resolves current `origin/main`, requires a successful completed CI
-run for that exact SHA, dispatches a new release, approves the environment for
-that run only, waits for completion, and verifies the completed run's SHA. The
-reason must be 10-100 characters because it is also recorded as the SSM command
+The helper resolves current `origin/main`, requires the **newest** CI run for
+that exact SHA to be a completed success, and passes the SHA into the manual
+dispatch as an explicit expected value. The workflow independently repeats
+both checks before installing dependencies or assuming AWS credentials, so a
+new commit, rerun, direct UI dispatch or local race fails early instead of
+building the wrong revision. The helper approves the environment for that run
+only, waits for completion, and verifies the completed run's SHA. The reason
+must be 10-100 characters because it is also recorded as the SSM command
 comment. A push or merge alone does not spend AWS compute or deploy.
 
 The exact-branch cloud trust is not a replacement for pull-request review or
@@ -202,10 +209,20 @@ production-like private beta rather than an HA SaaS platform.
 
 The workflow deploys only a full account-local `sutra/app@sha256:...` reference.
 `release-update.sh` stages the new host bundle, quiesces writers, snapshots the
-bounded application volume, runs additive migrations, waits for health and
-automatically restores the prior bundle/image/application state if the release
-fails. The workflow then checks `/api/healthz`, `/login` and `/status` through the
-real Cloudflare public origin.
+bounded application volume and a transaction-scoped root-only copy of the
+runtime environment, requires a fresh validated read of the exact
+`sutra/runtime/zoho` Secrets Manager document, runs additive migrations, and
+waits for health. It automatically restores the prior bundle, image,
+application state and protected runtime environment if the release fails.
+
+Before committing the host mutation, the transaction verifies `/api/healthz`,
+`/login`, `/status`, the self-serve federation response, and Google's exact
+authorization start contract through the real Cloudflare public origin. That
+identity check requires exactly Google and Zoho, a secure five-minute OIDC
+transaction cookie, the pinned Google endpoint, the canonical callback,
+`prompt=select_account`, PKCE S256, state and nonce. The workflow repeats the
+public checks externally and records the exact commit, image digest and retained
+tag in its release summary.
 
 ### The edge must not block the release verifier
 
@@ -265,7 +282,7 @@ Start with the source IP and paths only:
 
 ```
 (ip.src eq <release host egress IP>)
-and (http.request.uri.path in {"/api/healthz" "/api/status" "/login" "/api/turnstile/config"})
+and (http.request.uri.path in {"/api/healthz" "/api/status" "/login" "/api/turnstile/config" "/api/auth/federation" "/api/auth/oidc/start"})
 ```
 
 After one release succeeds, `/usr/local/sbin/sutra-release-update` is the new
@@ -289,7 +306,7 @@ curl -s https://checkip.amazonaws.com
 ```
 
 The rule deliberately requires the source IP as well as the User-Agent, and is
-limited to those four public GET paths. A header-token bypass was rejected on
+limited to those six public GET paths. A header-token bypass was rejected on
 purpose: a token that skips the WAF is a credential to leak and rotate, whereas an
 egress IP is not forgeable by a third party and needs nothing kept secret. Re-point
 the rule if the host is replaced or its Elastic IP changes — a stale IP in this rule

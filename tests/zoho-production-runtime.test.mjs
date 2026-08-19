@@ -19,8 +19,12 @@ test("production can switch between password and Zoho OIDC only through explicit
   assert.match(compose, /SUTRA_OIDC_TRANSACTION_KEY: \$\{SUTRA_OIDC_TRANSACTION_KEY:-\}/u);
   assert.match(setup, /const OIDC_VARS = \[[\s\S]*"SUTRA_OIDC_PROVIDERS"[\s\S]*"SUTRA_OIDC_TRANSACTION_KEY"/u);
   assert.match(setup, /hostedOidcProviderIssues\(process\.env\.SUTRA_OIDC_PROVIDERS\)/u);
-  assert.match(redeploy, /sync-zoho-runtime\.sh" --optional/u);
-  assert.match(release, /sync-zoho-runtime\.sh/u);
+  assert.match(redeploy, /SUTRA_REQUIRE_RUNTIME_SYNC:-false/u);
+  assert.match(redeploy, /sync_args=\(\)/u);
+  assert.match(redeploy, /sync_args=\(--optional\)/u);
+  assert.match(release, /SUTRA_REQUIRE_RUNTIME_SYNC=true "\$ROOT\/deploy\/ec2\/redeploy\.sh"/u);
+  assert.match(release, /docker\.env\.before-release/u);
+  assert.match(release, /Restored the protected pre-release identity and mail runtime/u);
 });
 
 test("the host reads only the exact Zoho runtime secret", () => {
@@ -44,6 +48,8 @@ test("runtime synchronization is fail-closed and never prints credential values"
   assert.match(sync, /SUTRA_OIDC_PROVIDERS[\s\S]*fromjson/u);
   assert.doesNotMatch(sync, /cat "\$payload"/u);
   assert.doesNotMatch(sync, /set -x/u);
+  assert.match(redeploy, /require_runtime_sync.+true.+false/u);
+  assert.match(redeploy, /SUTRA_REQUIRE_RUNTIME_SYNC must be exactly true or false/u);
 });
 
 test("the host accepts at most one optional Google provider pinned to Google's exact endpoints", () => {

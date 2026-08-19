@@ -34,12 +34,19 @@ CLOUDFLARED_CONFIG_TEMPLATE="deploy/ec2/cloudflared-config.yml.example"
 [ -f "$CLOUDFLARED_CREDENTIAL" ] || die "$CLOUDFLARED_CREDENTIAL not found. Restore the named-tunnel credential; never generate an unrelated replacement."
 [ -f "$CLOUDFLARED_CONFIG_TEMPLATE" ] || die "$CLOUDFLARED_CONFIG_TEMPLATE is missing from the selected release bundle."
 
+require_runtime_sync="${SUTRA_REQUIRE_RUNTIME_SYNC:-false}"
+[[ "$require_runtime_sync" == true || "$require_runtime_sync" == false ]] || \
+  die "SUTRA_REQUIRE_RUNTIME_SYNC must be exactly true or false."
 if [[ -x "$SCRIPT_DIR/sync-zoho-runtime.sh" ]]; then
+  sync_args=()
+  if [[ "$require_runtime_sync" != true ]]; then
+    sync_args=(--optional)
+  fi
   if (( EUID == 0 )); then
-    "$SCRIPT_DIR/sync-zoho-runtime.sh" --optional
+    "$SCRIPT_DIR/sync-zoho-runtime.sh" "${sync_args[@]}"
   else
     command -v sudo >/dev/null 2>&1 || die "Root privileges are required to install the protected Zoho runtime."
-    sudo "$SCRIPT_DIR/sync-zoho-runtime.sh" --optional
+    sudo "$SCRIPT_DIR/sync-zoho-runtime.sh" "${sync_args[@]}"
   fi
 fi
 

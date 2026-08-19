@@ -30,11 +30,16 @@ remote_sha="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
 [[ "${remote_sha}" == "${release_sha}" ]]
 
 ci_runs="$(gh api \
-  "repos/${repository_name}/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100")"
-if ! jq -e --arg release_sha "${release_sha}" \
-  '.workflow_runs | any(.head_sha == $release_sha and .conclusion == "success")' \
-  <<< "${ci_runs}" >/dev/null; then
-  echo "Current main ${release_sha} has no successful completed CI run; deployment is blocked." >&2
+  "repos/${repository_name}/actions/workflows/ci.yml/runs?branch=main&event=push&per_page=100")"
+latest_ci_run="$(jq -c --arg release_sha "${release_sha}" '
+  [.workflow_runs[] | select(.head_sha == $release_sha)]
+  | sort_by(.run_number, .run_attempt, .created_at)
+  | last // empty
+' <<< "${ci_runs}")"
+if [[ -z "${latest_ci_run}" ]] \
+  || [[ "$(jq -r '.status' <<< "${latest_ci_run}")" != "completed" ]] \
+  || [[ "$(jq -r '.conclusion' <<< "${latest_ci_run}")" != "success" ]]; then
+  echo "The newest CI run for current main ${release_sha} is not a completed success; deployment is blocked." >&2
   exit 1
 fi
 
@@ -47,7 +52,8 @@ echo "Dispatching EC2 release for main ${release_sha}."
 gh workflow run ec2-live-release.yml \
   --repo "${repository_name}" \
   --ref main \
-  -f "releaseReason=${release_reason}"
+  -f "releaseReason=${release_reason}" \
+  -f "expectedSha=${release_sha}"
 
 run_id=""
 for _ in $(seq 1 60); do
