@@ -26,6 +26,10 @@
 # via incorrect Punycode label processing in net/http's use of x/net/idna. Both
 # were published after the previous pin and are reported by the image scan
 # against the built binary, not against anything Sutra wrote.
+# x/mod joined for CVE-2026-56864 and CVE-2026-56865, which affect validation
+# of content from malicious module proxies/checksum databases and are fixed in
+# 0.40.0. The scanner image gate found both in Trivy's compiled dependency
+# closure on 2026-08-21.
 # Building it as a dependency
 # of a tiny external module is intentional: Go then records Trivy's real v0.72.0
 # module version in the binary instead of the unversioned/pseudo-version metadata
@@ -49,6 +53,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
   && go mod edit -replace=oras.land/oras-go/v2=oras.land/oras-go/v2@v2.6.2 \
   && go mod edit -replace=github.com/go-git/go-git/v5=github.com/go-git/go-git/v5@v5.19.2 \
   && go mod edit -replace=golang.org/x/net=golang.org/x/net@v0.56.0 \
+  && go mod edit -replace=golang.org/x/mod=golang.org/x/mod@v0.40.0 \
   && TRIVY_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
        go mod download -json github.com/aquasecurity/trivy@v0.72.0)" \
   && printf '%s\n' "${TRIVY_MODULE}" \
@@ -73,13 +78,17 @@ RUN --mount=type=cache,target=/go/pkg/mod \
        go mod download -json golang.org/x/net@v0.56.0)" \
   && printf '%s\n' "${XNET_MODULE}" \
        | grep -Fq '"Sum": "h1:Rw8j/hFzGvJUZwNBXnAtf5sVDVt+65SK2C7IxCxZt5o="' \
+  && XMOD_MODULE="$(GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org \
+       go mod download -json golang.org/x/mod@v0.40.0)" \
+  && printf '%s\n' "${XMOD_MODULE}" \
+       | grep -Fq '"Sum": "h1:hUv+3cXcdRHz08UmSiOob7sadHig73uo5bkXxQ/tvUs="' \
   && GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org go mod download all \
   && CGO_ENABLED=0 GOEXPERIMENT=jsonv2 GOMAXPROCS=2 \
      GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org go build \
        -mod=mod \
        -p=2 \
        -trimpath \
-       -ldflags="-s -w -extldflags '-static' -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.72.0-sutra.1" \
+       -ldflags="-s -w -extldflags '-static' -X github.com/aquasecurity/trivy/pkg/version/app.ver=0.72.0-sutra.2" \
        -o /out/trivy \
        github.com/aquasecurity/trivy/cmd/trivy
 
