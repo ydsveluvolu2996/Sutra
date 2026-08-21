@@ -14,8 +14,8 @@ grep -Fxq '!deploy/ec2/.env.ec2.example' "$ROOT/.dockerignore" || {
 
 bash -n "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
   "$EC2/bootstrap.sh" "$EC2/redeploy.sh" "$EC2/release-update.sh" \
-  "$EC2/sync-zoho-runtime.sh"
-[[ -x "$EC2/backup-prod.sh" && -x "$EC2/restore-prod.sh" && -x "$EC2/release-update.sh" ]]
+  "$EC2/sync-evidence-runtime.sh" "$EC2/sync-zoho-runtime.sh"
+[[ -x "$EC2/backup-prod.sh" && -x "$EC2/restore-prod.sh" && -x "$EC2/release-update.sh" && -x "$EC2/sync-evidence-runtime.sh" ]]
 
 ruby -e '
   require "yaml"
@@ -28,7 +28,8 @@ python3 - "$TEMPLATE" "$EC2/backup-prod.sh" "$EC2/restore-prod.sh" \
   "$EC2/release-update.sh" "$EC2/redeploy.sh" "$EC2/Caddyfile" \
   "$EC2/cloudflared-config.yml.example" "$EC2/maintenance/security.txt" \
   "$EC2/compose.prod.yaml" "$EC2/.env.ec2.example" "$EC2/sutra.service" \
-  "$EC2/sync-zoho-runtime.sh" <<'PY'
+  "$EC2/sync-zoho-runtime.sh" "$EC2/bootstrap.sh" \
+  "$EC2/sync-evidence-runtime.sh" <<'PY'
 from pathlib import Path
 import sys
 
@@ -44,6 +45,8 @@ compose = Path(sys.argv[9]).read_text(encoding="utf-8")
 env_template = Path(sys.argv[10]).read_text(encoding="utf-8")
 unit = Path(sys.argv[11]).read_text(encoding="utf-8")
 sync_runtime = Path(sys.argv[12]).read_text(encoding="utf-8")
+bootstrap = Path(sys.argv[13]).read_text(encoding="utf-8")
+sync_evidence = Path(sys.argv[14]).read_text(encoding="utf-8")
 
 required_template = [
     "Default: t3a.large",
@@ -89,6 +92,20 @@ required_template = [
     "arn:${AWS::Partition}:iam::*:role/sutra/*",
     "docker cp \"$RELEASE_CONTAINER:/app/deploy/ec2/.\"",
     "install -m 0755 deploy/ec2/release-update.sh /usr/local/sbin/sutra-release-update",
+    "EvidenceRetentionDays:",
+    "EvidenceKey:",
+    "EnableKeyRotation: true",
+    "EvidenceBucket:",
+    "DeletionPolicy: Retain",
+    "VersioningConfiguration: { Status: Enabled }",
+    "DenyEvidenceEncryptedWithUnexpectedKey",
+    "PolicyName: ReadWriteOnlyOpaqueManagedEvidence",
+    "Sid: ReadAndCreateImmutableEvidenceObjects",
+    "${EvidenceBucket.Arn}/evidence/v1/*",
+    "PolicyName: ReadOnlyExactEvidenceRuntimeConfig",
+    "Action: ssm:GetParameter",
+    "parameter/sutra/private-beta/evidence-config",
+    "Name: /sutra/private-beta/evidence-config",
 ]
 for fragment in required_template:
     if fragment not in template:
@@ -97,7 +114,6 @@ for fragment in required_template:
 prohibited_template = [
     "SecurityGroupIngress:",
     "AWS::EC2::EIP",
-    "AWS::S3::Bucket",
     "AWS::Logs::LogGroup",
     "AWS::CloudWatch::Alarm",
     "cloudflared-sutra.service",
@@ -120,6 +136,8 @@ prohibited_template = [
     "secretsmanager:PutResourcePolicy",
     "secretsmanager:TagResource",
     "secretsmanager:UntagResource",
+    "s3:DeleteObject",
+    "s3:ListBucket",
 ]
 for fragment in prohibited_template:
     if fragment in template:
@@ -142,8 +160,8 @@ for fragment in (
         raise SystemExit(f"Recoverable customer credential deletion is missing: {fragment}")
 
 credentials = template.index(".sutra/cloudflared/credentials.json")
-bootstrap = template.index("bash deploy/ec2/bootstrap.sh")
-if credentials >= bootstrap:
+bootstrap_position = template.index("bash deploy/ec2/bootstrap.sh")
+if credentials >= bootstrap_position:
     raise SystemExit("Tunnel credentials must be materialized before bootstrap")
 if "@sha256:[a-f0-9]{64}" not in template:
     raise SystemExit("SutraAppImage must reject mutable image tags")
@@ -324,6 +342,44 @@ if "SUTRA_AWS_STATIC_KEYS_ENABLED" in sync_runtime:
     raise SystemExit(
         "sync-zoho-runtime.sh must not read, write, or manage the operator-owned static-key switch"
     )
+for fragment in (
+    'PARAMETER_NAME="/sutra/private-beta/evidence-config"',
+    "aws ssm get-parameter",
+    'and keys == ["backend", "bucket", "kmsKeyArn", "retentionDays"]',
+    "SUTRA_EVIDENCE_BACKEND",
+    "SUTRA_EVIDENCE_BUCKET",
+    "SUTRA_EVIDENCE_KMS_KEY_ARN",
+    "SUTRA_EVIDENCE_RETENTION_DAYS",
+    'chmod 0600 "$temporary"',
+):
+    if fragment not in sync_evidence:
+        raise SystemExit(f"Evidence runtime synchronization is missing: {fragment}")
+for prohibited in ("--with-decryption", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+    if prohibited in sync_evidence:
+        raise SystemExit(f"Evidence runtime synchronization must not use credentials: {prohibited}")
+for script_name, script in (
+    ("bootstrap", bootstrap),
+    ("redeploy", redeploy),
+    ("release", release_update),
+):
+    if "sync-evidence-runtime.sh" not in script:
+        raise SystemExit(f"{script_name.title()} must synchronize managed evidence configuration")
+if bootstrap.index("sync-evidence-runtime.sh") >= bootstrap.index("ensure_cloudflared()"):
+    raise SystemExit("Bootstrap must synchronize evidence before external ingress setup")
+if redeploy.index("sync-evidence-runtime.sh") >= redeploy.index("DOCKER=\"docker\""):
+    raise SystemExit("Redeploy must synchronize evidence before rendering or pulling services")
+if release_update.index('bash "$STAGE_ROOT/deploy/ec2/sync-evidence-runtime.sh"') >= release_update.index("# Render before touching"):
+    raise SystemExit("Release must synchronize staged evidence configuration before Compose render")
+for name in (
+    "SUTRA_EVIDENCE_BACKEND",
+    "SUTRA_EVIDENCE_BUCKET",
+    "SUTRA_EVIDENCE_KMS_KEY_ARN",
+    "SUTRA_EVIDENCE_RETENTION_DAYS",
+):
+    if sum(line.lstrip().startswith(f"{name}: ") for line in compose.splitlines()) != 1:
+        raise SystemExit(f"The application Compose service must pass {name} exactly once")
+    if sum(line.startswith(f"{name}=") for line in env_lines) != 1:
+        raise SystemExit(f"The EC2 environment template must contain {name} exactly once")
 for fragment in (
     "AWS_REGION: ${AWS_REGION:-ap-south-1}",
     "AWS_DEFAULT_REGION: ${AWS_REGION:-ap-south-1}",

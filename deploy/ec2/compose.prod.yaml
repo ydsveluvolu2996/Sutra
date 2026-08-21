@@ -140,6 +140,15 @@ services:
       SUTRA_COLLECTOR_PRINCIPAL_ARN: ${SUTRA_COLLECTOR_PRINCIPAL_ARN:?Set the exact EC2 instance-role ARN}
       SUTRA_BROKER_URL: http://127.0.0.1:8788
       SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL: ${SUTRA_AWS_SUPPORT_CASES_EVIDENCE_KEY_BASE64URL:?Provision the dedicated AWS Support Cases evidence key in the ignored .sutra/docker.env}
+      # Every authoritative snapshot is archived before its CMDB projection is
+      # staged. These non-secret values are synchronized from the exact
+      # CloudFormation-owned SSM descriptor by the host deployment scripts.
+      # Empty defaults keep the first immutable upgrade render-compatible with
+      # a pre-feature host; setup-local-pilot rejects them before app startup.
+      SUTRA_EVIDENCE_BACKEND: ${SUTRA_EVIDENCE_BACKEND:-}
+      SUTRA_EVIDENCE_BUCKET: ${SUTRA_EVIDENCE_BUCKET:-}
+      SUTRA_EVIDENCE_KMS_KEY_ARN: ${SUTRA_EVIDENCE_KMS_KEY_ARN:-}
+      SUTRA_EVIDENCE_RETENTION_DAYS: ${SUTRA_EVIDENCE_RETENTION_DAYS:-}
       # Exact FinOps plan references are encrypted before persistence. Compose
       # must reject the release before creating any service when either half of
       # this operator-provisioned pair is absent; setup-local-pilot validates

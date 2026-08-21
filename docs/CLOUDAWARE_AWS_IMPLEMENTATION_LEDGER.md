@@ -5,7 +5,42 @@ This ledger records implementation checkpoints for the AWS CMDB roadmap in
 catalog entry is not collector coverage, local verification is not live AWS
 acceptance, and absent or failed evidence is never reported as zero.
 
-## Active checkpoint — Milestone 1A VPC first-class subresources
+## Active checkpoint — AWS onboarding evidence-storage publication repair
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-21 (Asia/Kolkata) |
+| Baseline commit | `6757939c106fbfed891b95f383dad91f34625aaa` |
+| Final implementation commit | Pending verified `work:save` checkpoint |
+| Branch | `develop` only |
+| Vertical | Restore first-inventory publication on the single-node private-beta host without weakening archive-before-promotion. |
+| User-visible symptom | Static access keys or role trust validate, then Inventory reports a generic collection failure and correctly publishes no authoritative CMDB projection. |
+| Root cause | The staging runtime requires managed S3/KMS evidence archival, but the single-node CloudFormation stack, Compose runtime, and Worker runtime file did not provision or propagate the four `SUTRA_EVIDENCE_*` settings. `EvidenceRepository.archive` therefore failed before CMDB staging. |
+| Infrastructure | Added a dedicated retained, versioned, public-blocked S3 bucket; a retained rotating CMK; TLS/exact-key bucket denies; bounded lifecycle; an exact non-secret SSM descriptor; and outputs. |
+| Least privilege | The EC2 role receives only `s3:GetObject`/`s3:PutObject` under `evidence/v1/*`, no list/delete, KMS use only for the exact key through regional S3, and `ssm:GetParameter` only for `/sutra/private-beta/evidence-config`. Customer onboarding roles and collector operations are unchanged. |
+| Runtime propagation | A new host helper validates and atomically copies the descriptor without logging identifiers. Bootstrap, redeploy, and release staging invoke it before app startup; Compose passes the values; `setup-local-pilot.mjs` validates and materializes them into the Worker runtime. |
+| Tenant isolation / credentials | No tenant routing or persistence scope changed. Evidence object keys remain opaque and tenant-scoped inside the existing repository. No AWS access key or secret is accepted, stored, logged, or added; workload identity remains the Sutra-host credential source. |
+| Truthful state / failure handling | Archive-before-staging remains unchanged. Missing, malformed, placeholder, cross-Region, duplicate, or overridden configuration fails startup/release and never turns a failed/unpublished collection into zero or success. |
+| Migrations | Not applicable; no schema, registry, migrator, or persisted shape changed. |
+| External rollout | Pending explicit authorization. No CloudFormation update, application deploy, customer AWS call, or live-provider mutation is part of this checkpoint. Existing live onboarding remains blocked until the stack and approved immutable release are updated. |
+| Standing PR / CI | Pending implementation checkpoint and exact standing `develop` → `main` PR run. |
+
+### Verification record
+
+| Check | Result |
+|---|---|
+| Focused storage/runtime/security tests | 18 new/adjacent storage and private-beta tests plus 61 existing evidence, cross-tenant, onboarding, sync-truth, and collector-boundary tests passed; 0 failed. |
+| EC2 operational contracts / CloudFormation lint | Passed. All 28 templates passed with 42 existing documented Bedrock catalog false positives suppressed; isolated Compose, Caddy, and Tunnel runtime verification passed outside the Docker Desktop `Documents` mount restriction. |
+| Typecheck / collector typecheck / affected lint | Root and collector typechecks passed; affected and full ESLint passed. |
+| Secret scan / migration diff | Secret scan passed for 2,669 files. Migration diff passed / not applicable: no schema, registry, migrator, or migration file changed. |
+| Build / rendered routes | Production build passed; rendered route checks passed 4/4, including anonymous private-route redirects. |
+| Signed-in browser evidence | Unavailable: the available Chrome session has no Sutra application tab; no live mutation attempted. |
+| Standing PR CI | Pending |
+
+The bounded diagnosis, frozen files, security decisions, and rollout boundary are
+recorded in `docs/AWS_ONBOARDING_EVIDENCE_STORAGE_CLOSURE.md`.
+
+## Completed checkpoint — Milestone 1A VPC first-class subresources
 
 | Field | Value |
 |---|---|

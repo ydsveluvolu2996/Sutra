@@ -240,6 +240,13 @@ if (
 }
 const privateBetaRequested = privateBetaPasswordSwitch === "true" || privateBetaOidcSwitch === "true";
 const releaseImage = validatedReleaseImage(process.env.SUTRA_RELEASE_IMAGE);
+const EVIDENCE_VAR_NAMES = [
+  "SUTRA_EVIDENCE_BACKEND",
+  "SUTRA_EVIDENCE_BUCKET",
+  "SUTRA_EVIDENCE_KMS_KEY_ARN",
+  "SUTRA_EVIDENCE_RETENTION_DAYS",
+];
+let evidenceVars = [];
 const finopsEvidenceKey = environmentFinopsEvidenceKey
   ?? storedFinopsEvidenceKey
   ?? secret();
@@ -365,6 +372,42 @@ if (privateBetaRequested) {
   if (releaseImage === null) {
     throw new Error("SUTRA_RELEASE_IMAGE is required for the network-reachable private beta");
   }
+  const evidenceValues = Object.fromEntries(EVIDENCE_VAR_NAMES.map((name) => {
+    const value = process.env[name]?.trim() ?? "";
+    if (/\r|\n/u.test(value)) throw new Error(`${name} must be a single line`);
+    if (!value) throw new Error(`${name} is required for the network-reachable private beta`);
+    return [name, value];
+  }));
+  if (evidenceValues.SUTRA_EVIDENCE_BACKEND !== "s3") {
+    throw new Error("SUTRA_EVIDENCE_BACKEND must be exactly s3 for the private beta");
+  }
+  const evidenceBucket = evidenceValues.SUTRA_EVIDENCE_BUCKET;
+  if (
+    !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/u.test(evidenceBucket)
+    || evidenceBucket.includes("..")
+    || /^\d+\.\d+\.\d+\.\d+$/u.test(evidenceBucket)
+    || evidenceBucket.includes("placeholder")
+  ) {
+    throw new Error("SUTRA_EVIDENCE_BUCKET must be an exact managed S3 bucket name");
+  }
+  const kmsMatch = evidenceValues.SUTRA_EVIDENCE_KMS_KEY_ARN.match(
+    /^arn:aws:kms:([a-z0-9-]+):([0-9]{12}):key\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/u,
+  );
+  if (kmsMatch === null || kmsMatch[1] !== awsRegion || kmsMatch[2] === "000000000000") {
+    throw new Error("SUTRA_EVIDENCE_KMS_KEY_ARN must be an exact managed key in the application Region");
+  }
+  const evidenceRetention = evidenceValues.SUTRA_EVIDENCE_RETENTION_DAYS;
+  if (!/^\d+$/u.test(evidenceRetention)) {
+    throw new Error("SUTRA_EVIDENCE_RETENTION_DAYS must be an integer from 30 through 3650");
+  }
+  const evidenceRetentionDays = Number(evidenceRetention);
+  if (evidenceRetentionDays < 30 || evidenceRetentionDays > 3650) {
+    throw new Error("SUTRA_EVIDENCE_RETENTION_DAYS must be an integer from 30 through 3650");
+  }
+  evidenceVars = EVIDENCE_VAR_NAMES.map((name) => ({
+    name,
+    value: evidenceValues[name],
+  }));
   privateBetaVars = [
     ...Object.entries(expected).map(([name, value]) => ({ name, value })),
     { name: "SUTRA_IDENTITY_MODE", value: identityMode },
@@ -372,6 +415,7 @@ if (privateBetaRequested) {
     { name: "SUTRA_RELEASE_IMAGE", value: releaseImage },
     { name: "SUTRA_PRIVATE_BETA_PASSWORD_ENABLED", value: privateBetaPasswordSwitch ?? "false" },
     { name: "SUTRA_PRIVATE_BETA_OIDC_ENABLED", value: privateBetaOidcSwitch ?? "false" },
+    ...evidenceVars,
     ...turnstileVars,
   ];
 }
@@ -464,6 +508,14 @@ if (existingContents === null) {
   // start. Compose supplies the value again on every real private-beta start.
   if (!privateBetaRequested && /^SUTRA_RELEASE_IMAGE=/mu.test(updatedContents)) {
     updatedContents = updatedContents.replace(/^SUTRA_RELEASE_IMAGE=.*(?:\n|$)/mu, "");
+  }
+  // A local-mode start must not retain managed-host storage identifiers. Local
+  // evidence remains in the local immutable table, and no stale S3 setting may
+  // make that developer state look like hosted evidence.
+  if (!privateBetaRequested) {
+    for (const name of EVIDENCE_VAR_NAMES) {
+      updatedContents = updatedContents.replace(new RegExp(`^${name}=.*(?:\\n|$)`, "mu"), "");
+    }
   }
   if (databaseUrl) {
     if (/^DATABASE_URL=/mu.test(updatedContents)) {

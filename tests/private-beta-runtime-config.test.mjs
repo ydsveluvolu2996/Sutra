@@ -30,6 +30,10 @@ const PRIVATE_BETA_KEYS = new Set([
   "SUTRA_TURNSTILE_DEV_BYPASS",
   "SUTRA_HOSTED_SELF_SERVE_SIGNUP",
   "SUTRA_HOSTED_SIGNUP_ALLOWED_DOMAINS",
+  "SUTRA_EVIDENCE_BACKEND",
+  "SUTRA_EVIDENCE_BUCKET",
+  "SUTRA_EVIDENCE_KMS_KEY_ARN",
+  "SUTRA_EVIDENCE_RETENTION_DAYS",
 ]);
 
 const RELEASE_IMAGE =
@@ -40,6 +44,14 @@ const TURNSTILE = {
   SUTRA_TURNSTILE_SECRET_KEY: "0x4BBBBBBBBBBBBBBBBBBBBBBB",
   SUTRA_TURNSTILE_DEV_BYPASS: "false",
 };
+const EVIDENCE = {
+  SUTRA_EVIDENCE_BACKEND: "s3",
+  SUTRA_EVIDENCE_BUCKET: "sutra-private-beta-evidence-test",
+  SUTRA_EVIDENCE_KMS_KEY_ARN:
+    "arn:aws:kms:ap-south-1:738663485493:key/11111111-2222-3333-4444-555555555555",
+  SUTRA_EVIDENCE_RETENTION_DAYS: "365",
+};
+const PRIVATE_BETA_RUNTIME = { ...TURNSTILE, ...EVIDENCE };
 const OIDC = {
   SUTRA_OIDC_PROVIDERS: JSON.stringify([{
     id: "zoho",
@@ -81,7 +93,7 @@ test("setup materializes only the explicit staging private-beta password allowli
       SUTRA_IDENTITY_MODE: "password",
       SUTRA_PASSWORD_MFA_REQUIRED: "true",
       SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
-      ...TURNSTILE,
+      ...PRIVATE_BETA_RUNTIME,
     });
     await execute(process.execPath, [setupScript], { env: environment });
     const contents = await readFile(config, "utf8");
@@ -98,6 +110,10 @@ test("setup materializes only the explicit staging private-beta password allowli
     assert.match(contents, /^SUTRA_TURNSTILE_SITE_KEY=0x4A+$/mu);
     assert.match(contents, /^SUTRA_TURNSTILE_SECRET_KEY=0x4B+$/mu);
     assert.match(contents, /^SUTRA_TURNSTILE_DEV_BYPASS=false$/mu);
+    assert.match(contents, /^SUTRA_EVIDENCE_BACKEND=s3$/mu);
+    assert.match(contents, /^SUTRA_EVIDENCE_BUCKET=sutra-private-beta-evidence-test$/mu);
+    assert.match(contents, /^SUTRA_EVIDENCE_KMS_KEY_ARN=arn:aws:kms:ap-south-1:738663485493:key\/11111111-2222-3333-4444-555555555555$/mu);
+    assert.match(contents, /^SUTRA_EVIDENCE_RETENTION_DAYS=365$/mu);
     assert.doesNotMatch(contents, /^SUTRA_PASSWORD_IDENTITY_ENABLED=true$/mu);
 
     // Removing the process-level opt-in disables a value retained on the
@@ -111,6 +127,7 @@ test("setup materializes only the explicit staging private-beta password allowli
     const localContents = await readFile(config, "utf8");
     assert.match(localContents, /^SUTRA_PRIVATE_BETA_PASSWORD_ENABLED=false$/mu);
     assert.doesNotMatch(localContents, /^SUTRA_RELEASE_IMAGE=/mu);
+    assert.doesNotMatch(localContents, /^SUTRA_EVIDENCE_/mu);
   });
 });
 
@@ -127,7 +144,7 @@ test("setup materializes an explicitly approved invitation-only private-beta OID
       SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false",
       SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
       ...OIDC,
-      ...TURNSTILE,
+      ...PRIVATE_BETA_RUNTIME,
     });
     await execute(process.execPath, [setupScript], { env: environment });
     const contents = await readFile(config, "utf8");
@@ -153,7 +170,7 @@ test("the self-serve signup switch reaches the Worker runtime file and fails clo
       SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "false",
       SUTRA_PRIVATE_BETA_OIDC_ENABLED: "true",
       ...OIDC,
-      ...TURNSTILE,
+      ...PRIVATE_BETA_RUNTIME,
     };
     // The compose file passes the switch into the container process env; the
     // Worker only ever sees what setup writes to .dev.vars. Release 24 shipped
@@ -228,7 +245,7 @@ test("private-beta identity switches cannot cross-enable password and OIDC adapt
           SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
           SUTRA_LOCAL_MODE: "false",
           SUTRA_PASSWORD_MFA_REQUIRED: "true",
-          ...TURNSTILE,
+          ...PRIVATE_BETA_RUNTIME,
           ...overrides,
         }),
       }));
@@ -322,11 +339,50 @@ test("network private-beta setup rejects Cloudflare's public test credentials", 
             SUTRA_IDENTITY_MODE: "password",
             SUTRA_PASSWORD_MFA_REQUIRED: "true",
             SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
-            ...TURNSTILE,
+            ...PRIVATE_BETA_RUNTIME,
             ...turnstile,
           }),
         }),
         /test credentials are forbidden/u,
+      );
+    });
+  }
+});
+
+test("network private-beta setup rejects missing or malformed managed evidence storage", async () => {
+  const cases = [
+    ["SUTRA_EVIDENCE_BACKEND", undefined],
+    ["SUTRA_EVIDENCE_BACKEND", "local"],
+    ["SUTRA_EVIDENCE_BUCKET", "sutra-private-beta-evidence-placeholder"],
+    [
+      "SUTRA_EVIDENCE_KMS_KEY_ARN",
+      "arn:aws:kms:us-east-1:738663485493:key/11111111-2222-3333-4444-555555555555",
+    ],
+    [
+      "SUTRA_EVIDENCE_KMS_KEY_ARN",
+      "arn:aws:kms:ap-south-1:000000000000:key/11111111-2222-3333-4444-555555555555",
+    ],
+    ["SUTRA_EVIDENCE_RETENTION_DAYS", "29"],
+    ["SUTRA_EVIDENCE_RETENTION_DAYS", "3651"],
+  ];
+  for (const [name, value] of cases) {
+    await withConfig(async (config) => {
+      const environment = cleanEnvironment({
+        SUTRA_LOCAL_CONFIG_PATH: config,
+        SUTRA_DEPLOYMENT_ENV: "staging",
+        SUTRA_PUBLIC_ORIGIN: "https://www.sutracmdb.com",
+        SUTRA_RELEASE_IMAGE: RELEASE_IMAGE,
+        SUTRA_LOCAL_MODE: "false",
+        SUTRA_IDENTITY_MODE: "password",
+        SUTRA_PASSWORD_MFA_REQUIRED: "true",
+        SUTRA_PRIVATE_BETA_PASSWORD_ENABLED: "true",
+        ...PRIVATE_BETA_RUNTIME,
+      });
+      if (value === undefined) delete environment[name];
+      else environment[name] = value;
+      await assert.rejects(
+        execute(process.execPath, [setupScript], { env: environment }),
+        /SUTRA_EVIDENCE_/u,
       );
     });
   }

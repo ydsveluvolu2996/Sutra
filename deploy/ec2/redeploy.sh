@@ -34,6 +34,11 @@ CLOUDFLARED_CONFIG_TEMPLATE="deploy/ec2/cloudflared-config.yml.example"
 [ -f "$CLOUDFLARED_CREDENTIAL" ] || die "$CLOUDFLARED_CREDENTIAL not found. Restore the named-tunnel credential; never generate an unrelated replacement."
 [ -f "$CLOUDFLARED_CONFIG_TEMPLATE" ] || die "$CLOUDFLARED_CONFIG_TEMPLATE is missing from the selected release bundle."
 
+# Refresh the CloudFormation-owned evidence descriptor before any Compose
+# render. A missing permission, parameter, bucket, or key fails this release
+# without presenting an unarchivable onboarding flow as ready.
+bash "$SCRIPT_DIR/sync-evidence-runtime.sh" "$REPO_ROOT/$ENV_EC2" "$REPO_ROOT/$DOCKER_ENV"
+
 require_runtime_sync="${SUTRA_REQUIRE_RUNTIME_SYNC:-false}"
 [[ "$require_runtime_sync" == true || "$require_runtime_sync" == false ]] || \
   die "SUTRA_REQUIRE_RUNTIME_SYNC must be exactly true or false."

@@ -6,6 +6,10 @@ const template = readFileSync(
   new URL("../infrastructure/production-ha.yaml", import.meta.url),
   "utf8",
 );
+const singleNodeTemplate = readFileSync(
+  new URL("../deploy/ec2/cloudformation-single-node.yaml", import.meta.url),
+  "utf8",
+);
 const entrypoint = readFileSync(
   new URL("../deploy/production/entrypoint.sh", import.meta.url),
   "utf8",
@@ -45,6 +49,18 @@ test("production evidence storage is private, KMS-bound, retained, and least pri
   assert.match(entrypoint, /SUTRA_EVIDENCE_BUCKET/u);
   assert.match(entrypoint, /SUTRA_EVIDENCE_KMS_KEY_ARN/u);
   assert.match(entrypoint, /SUTRA_EVIDENCE_RETENTION_DAYS/u);
+});
+
+test("private-beta evidence storage preserves the managed production contract", () => {
+  assert.match(singleNodeTemplate, /EvidenceKey:/u);
+  assert.match(singleNodeTemplate, /EvidenceBucket:/u);
+  assert.match(singleNodeTemplate, /DeletionPolicy: Retain/u);
+  assert.match(singleNodeTemplate, /EnableKeyRotation: true/u);
+  assert.match(singleNodeTemplate, /DenyEvidenceEncryptedWithUnexpectedKey/u);
+  assert.match(singleNodeTemplate, /\$\{EvidenceBucket\.Arn\}\/evidence\/v1\/\*/u);
+  assert.match(singleNodeTemplate, /s3:GetObject/u);
+  assert.match(singleNodeTemplate, /s3:PutObject/u);
+  assert.doesNotMatch(singleNodeTemplate, /s3:DeleteObject|s3:ListBucket/u);
 });
 
 test("download is application-streamed with one-time opaque tokens and no caller key", () => {

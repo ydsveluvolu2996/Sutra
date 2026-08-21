@@ -418,7 +418,7 @@ RELEASE_CONTAINER=""
 for required in \
   compose.prod.yaml .env.ec2.example Caddyfile cloudflared-config.yml.example \
   maintenance/security.txt bootstrap.sh redeploy.sh release-update.sh \
-  sync-zoho-runtime.sh verify-public-auth.sh sutra.service; do
+  sync-evidence-runtime.sh sync-zoho-runtime.sh verify-public-auth.sh sutra.service; do
   [[ -f "$STAGE_ROOT/deploy/ec2/$required" ]] || die "Release bundle is missing deploy/ec2/$required."
 done
 [[ -f "$STAGE_ROOT/docker/postgres-init.sh" ]] || die "Release bundle is missing docker/postgres-init.sh."
@@ -426,6 +426,7 @@ bash -n \
   "$STAGE_ROOT/deploy/ec2/bootstrap.sh" \
   "$STAGE_ROOT/deploy/ec2/redeploy.sh" \
   "$STAGE_ROOT/deploy/ec2/release-update.sh" \
+  "$STAGE_ROOT/deploy/ec2/sync-evidence-runtime.sh" \
   "$STAGE_ROOT/deploy/ec2/sync-zoho-runtime.sh" \
   "$STAGE_ROOT/deploy/ec2/verify-public-auth.sh" \
   "$STAGE_ROOT/docker/postgres-init.sh"
@@ -459,6 +460,12 @@ if grep -q '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$DOCKER_ENV"; then
   die "Keep SUTRA_AWS_STATIC_KEYS_ENABLED only in $ENV_EC2; the later runtime env must not override the emergency switch."
 fi
 export SUTRA_AWS_STATIC_KEYS_ENABLED="$staged_static_keys_enabled"
+
+# New release scripts validate and materialize the exact CloudFormation-owned
+# storage descriptor into the staged operator environment before rendering.
+# The helper logs no bucket, key, credential, or object identifier.
+bash "$STAGE_ROOT/deploy/ec2/sync-evidence-runtime.sh" \
+  "$STAGE_ROOT/deploy/ec2/.env.ec2" "$DOCKER_ENV"
 
 # Render before touching the active host bundle. This catches malformed Compose
 # changes, missing environment keys and relative-volume regressions.

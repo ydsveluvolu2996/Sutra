@@ -24,6 +24,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | `bootstrap.sh` | Idempotent install, secret generation, immutable pulls and first launch |
 | `redeploy.sh` | Reapply the already-selected digest, migrate and health-check; no build |
 | `release-update.sh` | Stage a new immutable ECR digest, validate, deploy and roll back on failure |
+| `sync-evidence-runtime.sh` | Validate the CloudFormation-owned S3/KMS descriptor and atomically materialize its non-secret Worker settings |
 | `manual-host-control.sh` | SSO-only start, stop and status for the exact retained EC2 host |
 | `ecr-lifecycle-policy.json` | Retain three validated releases and age out failed scan candidates |
 | `Caddyfile` | Private HTTP origin, canonical public Host boundary and app-down `503` |
@@ -49,6 +50,7 @@ rules, no SSH rule, and no Elastic IP. SSM is the administration path.
 | Public origin | `https://www.sutracmdb.com` through Cloudflare only |
 | Edge Worker | `sutra-edge-fallback`; apex and `www` routes with request-limit fail-open |
 | AWS Budget | `SutraPrivateBeta-20USD`; $20 gross, credits excluded; not a hard cap |
+| Collector evidence | Dedicated private versioned S3 bucket, retained CMK, 365-day default lifecycle |
 
 The host receives an ephemeral public IPv4 only for outbound internet access.
 There is no inbound route to it. This avoids the much larger fixed cost of a NAT
@@ -143,6 +145,7 @@ aws cloudformation deploy \
     EnableMaximumRuntimeStop=false MaximumRuntimeHours=6 \
     EnableDailyAutoStop=false 'DailyStopSchedule=cron(30 23 * * ? *)' \
     DailyStopTimezone=Asia/Kolkata \
+    EvidenceRetentionDays=365 \
     SutraAppImage="$SUTRA_APP_IMAGE" \
     SutraDomain=sutracmdb.com \
     CloudflareTunnelCredentialsParameterName=/sutra/production/cloudflare-tunnel-credentials
@@ -150,10 +153,12 @@ aws cloudformation deploy \
 
 CloudFormation user data installs the runtime, pulls the approved image by
 digest, extracts only its host deployment bundle, materializes the tunnel
-credential from SSM, runs `bootstrap.sh`, and enables `sutra.service`. Both
+credential from SSM, synchronizes the non-secret managed evidence descriptor,
+runs `bootstrap.sh`, and enables `sutra.service`. Both
 automatic EC2 stop mechanisms are opt-in and are disabled in the current
 manual-control phase. It never clones GitHub and does not enable the optional
-backup timer.
+backup timer. The retained evidence bucket is application evidence storage, not
+a PostgreSQL or `.sutra` backup target.
 
 After the app is healthy, configure a provider-verified invitation sender with
 `sudo deploy/ec2/configure-invitation-email.sh`. The helper stores the API key
@@ -176,9 +181,11 @@ sudo bash deploy/ec2/bootstrap.sh
 1. installs Docker Engine/Compose if needed;
 2. preserves or creates 256-bit database/job secrets in `.sutra/docker.env`;
 3. requires an ECR image digest in ignored `deploy/ec2/.env.ec2`;
-4. validates `.sutra/cloudflared/config.yml` and `credentials.json`;
-5. authenticates to the scoped ECR registry;
-6. pulls and starts the stack with `--no-build`.
+4. reads and validates `/sutra/private-beta/evidence-config` with the instance
+   role and writes the bucket/key identifiers to `.env.ec2` without logging them;
+5. validates `.sutra/cloudflared/config.yml` and `credentials.json`;
+6. authenticates to the scoped ECR registry;
+7. pulls and starts the stack with `--no-build`.
 
 For a normal future release, first publish the new image digest off-host, then
 select it through SSM:
@@ -197,6 +204,31 @@ bundle. A failed release restores that exact pre-release state. Selecting an
 older digest never substitutes a historical customer-data snapshot: the older
 image must read current state or the release fails back to the current image and
 data. Mutable tags, GitHub tokens and host builds are deliberately unsupported.
+
+### Immutable collector evidence
+
+An authoritative CMDB projection is never published unless its source snapshot
+has first been archived. The single-node stack therefore creates a dedicated
+retained S3 bucket and retained customer-managed KMS key. Public access is
+blocked, TLS and the exact key are enforced by bucket policy, versioning is on,
+and lifecycle expiry defaults to 365 days. The instance role has only
+`s3:GetObject` and `s3:PutObject` under `evidence/v1/*`; it has no list or delete
+permission. KMS use is restricted to that key through regional S3.
+
+CloudFormation stores only the four non-secret runtime values in the exact SSM
+parameter `/sutra/private-beta/evidence-config`. `bootstrap.sh`, `redeploy.sh`,
+and `release-update.sh` invoke `sync-evidence-runtime.sh` before app startup.
+The helper rejects missing, duplicate, malformed, cross-Region, placeholder, or
+later-env overrides and never prints the bucket or key. `setup-local-pilot.mjs`
+then validates and copies the values into the Worker runtime file. A failure at
+any point leaves inventory collection failed and publishes no CMDB snapshot.
+
+For an existing stack, update CloudFormation first so the retained bucket, CMK,
+SSM descriptor, and exact instance-role permissions exist. Then select the
+approved immutable application release through the normal SSM release command.
+The pre-feature release updater can stage the compatible Compose file; the new
+bundle's redeploy step synchronizes the descriptor before starting the app.
+Do not hand-edit these four variables or put them in `.sutra/docker.env`.
 
 ### AWS access-key emergency switch
 
@@ -340,8 +372,9 @@ The encrypted `backup-prod.sh`, guarded `restore-prod.sh`, systemd service, and
 timer are provided but **disabled**. Do not enable them on the 15 GiB host until
 all of the following are ready: an age public recipient whose private identity
 is off-host, a reviewed offsite target, sufficient free space, retention, IAM,
-cost review, a restore drill, and monitoring. No S3 bucket is created by the
-minimal stack.
+cost review, a restore drill, and monitoring. The dedicated evidence bucket
+must not be reused for these host backups; the instance role deliberately lacks
+list/delete and backup-prefix permissions.
 
 Monitor the constrained disk:
 
@@ -361,10 +394,12 @@ sudo docker image prune -f
 ## Cost and security exclusions
 
 The minimal stack intentionally excludes NAT Gateway, Elastic IP, ALB, RDS,
-S3, custom CloudWatch log groups/alarms, paid Inspector/Security Hub/GuardDuty,
-and the optional notification worker. AWS Budgets provides a $20 gross warning,
-not enforcement. Promotional credits may offset eligible charges but must not
-be treated as a spending control.
+custom CloudWatch log groups/alarms, paid Inspector/Security Hub/GuardDuty, and
+the optional notification worker. It does include the required retained
+evidence bucket and CMK, whose storage, request, lifecycle-transition, and KMS
+request charges continue independently of EC2 runtime. AWS Budgets provides a
+$20 gross warning, not enforcement. Promotional credits may offset eligible
+charges but must not be treated as a spending control.
 
 The security group has no inbound rules. Do not add `22`, `80`, `443`, app, or
 database ports. Keep IMDSv2 required, EBS encryption enabled, standard CPU

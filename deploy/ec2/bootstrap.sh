@@ -167,6 +167,11 @@ ensure_env_ec2() {
 }
 ensure_env_ec2
 
+# Snapshot publication is fail-closed: obtain the exact non-secret bucket/key
+# descriptor with the instance role before Compose renders or the Worker starts.
+bash "$SCRIPT_DIR/sync-evidence-runtime.sh" \
+  "$REPO_ROOT/$ENV_EC2" "$REPO_ROOT/$DOCKER_ENV"
+
 # --- 5. Cloudflare named-tunnel files -----------------------------------------
 ensure_cloudflared() {
   mkdir -p "$CLOUDFLARED_DIR"

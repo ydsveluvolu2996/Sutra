@@ -65,13 +65,14 @@ misconfigurations:
       remediation for this specific resource.
   - id: AWS-0132
     paths:
+      - deploy/ec2/cloudformation-single-node.yaml
       - infrastructure/production-ha.yaml
       - infrastructure/production-ha-bootstrap-iam.yaml
     statement: >-
       These paths contain scanner false positives plus one AWS service
-      constraint. EvidenceBucket and BootstrapTemplateBucket explicitly use
-      aws:kms and the supplied customer-managed KmsKeyArn, but the scanner
-      cannot resolve that CloudFormation intrinsic. AccessLogBucket is
+      constraint. Both EvidenceBucket resources and BootstrapTemplateBucket
+      explicitly use aws:kms and an exact customer-managed KMS ARN, but the
+      scanner cannot resolve the CloudFormation Ref/GetAtt intrinsic. AccessLogBucket is
       exclusively the ALB access-log destination; ALB log delivery requires
       SSE-S3 and does not support SSE-KMS for that destination. Every bucket
       blocks public access, enforces TLS, versions objects, and retains data
