@@ -249,6 +249,7 @@ export interface FinopsCudosBedrockTokenBucket {
   readonly cacheReadRatioBasisPoints: string | null;
   readonly cacheWriteRatioBasisPoints: string | null;
   readonly ratioUnavailableReason:
+    | "missing_usage_quantity"
     | "missing_input_tokens"
     | "missing_cache_read_tokens"
     | "missing_cache_write_tokens"
@@ -456,6 +457,7 @@ interface MutableBedrockTokenBucket {
   readonly currency: string;
   readonly usageUnit: string;
   lineCount: number;
+  missingUsageQuantityLineCount: number;
   readonly usage: Record<FinopsCudosBedrockTokenClass, {
     lineCount: number;
     quantity: bigint;
@@ -1559,7 +1561,7 @@ export function buildFinopsCudosDashboard(
     const tokenClass = bedrockTokenClass(line);
     if (tokenClass !== null) {
       bedrockClassifiedLineCount += 1;
-      if (line.usageAmountMicros === null || line.usageUnit === null) {
+      if (line.usageUnit === null) {
         bedrockMissingUsageEvidenceLineCount += 1;
       } else {
         const key = JSON.stringify([month, line.currency, line.usageUnit]);
@@ -1570,13 +1572,19 @@ export function buildFinopsCudosDashboard(
             currency: line.currency,
             usageUnit: line.usageUnit,
             lineCount: 0,
+            missingUsageQuantityLineCount: 0,
             usage: newBedrockUsage(),
           };
           bedrockTokenBuckets.set(key, bucket);
         }
-        bucket.lineCount += 1;
-        bucket.usage[tokenClass].lineCount += 1;
-        bucket.usage[tokenClass].quantity += BigInt(line.usageAmountMicros);
+        if (line.usageAmountMicros === null) {
+          bedrockMissingUsageEvidenceLineCount += 1;
+          bucket.missingUsageQuantityLineCount += 1;
+        } else {
+          bucket.lineCount += 1;
+          bucket.usage[tokenClass].lineCount += 1;
+          bucket.usage[tokenClass].quantity += BigInt(line.usageAmountMicros);
+        }
       }
     }
 
@@ -1860,18 +1868,20 @@ export function buildFinopsCudosDashboard(
       const input = bucket.usage.input;
       const cacheRead = bucket.usage.cache_read;
       const cacheWrite = bucket.usage.cache_write;
-      const ratioUnavailableReason = input.lineCount === 0
-        ? "missing_input_tokens" as const
-        : cacheRead.lineCount === 0
-          ? "missing_cache_read_tokens" as const
-          : cacheWrite.lineCount === 0
-            ? "missing_cache_write_tokens" as const
-            : [input.quantity, cacheRead.quantity, cacheWrite.quantity]
-                .some((quantity) => quantity < BigInt(0))
-                || input.quantity + cacheRead.quantity + cacheWrite.quantity
-                  <= BigInt(0)
-              ? "non_positive_or_negative_usage_quantity" as const
-              : null;
+      const ratioUnavailableReason = bucket.missingUsageQuantityLineCount > 0
+        ? "missing_usage_quantity" as const
+        : input.lineCount === 0
+          ? "missing_input_tokens" as const
+          : cacheRead.lineCount === 0
+            ? "missing_cache_read_tokens" as const
+            : cacheWrite.lineCount === 0
+              ? "missing_cache_write_tokens" as const
+              : [input.quantity, cacheRead.quantity, cacheWrite.quantity]
+                  .some((quantity) => quantity < BigInt(0))
+                  || input.quantity + cacheRead.quantity + cacheWrite.quantity
+                    <= BigInt(0)
+                ? "non_positive_or_negative_usage_quantity" as const
+                : null;
       const denominator = input.quantity + cacheRead.quantity
         + cacheWrite.quantity;
       const materializeUsage = (tokenClass: FinopsCudosBedrockTokenClass) => {

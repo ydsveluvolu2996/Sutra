@@ -316,6 +316,46 @@ describe("Foundational CUDOS pure engine", () => {
       result.bedrockTokens.buckets.map(({ usageUnit }) => usageUnit),
       ["1K Tokens", "1M Tokens"],
     );
+    assert.equal(
+      result.bedrockTokens.buckets.find(({ usageUnit }) =>
+        usageUnit === "1M Tokens")?.ratioUnavailableReason,
+      "missing_usage_quantity",
+    );
+  });
+
+  it("withholds a Bedrock bucket ratio when a compatible row lacks quantity", () => {
+    const [base] = baseLines();
+    const bedrock = (
+      lineItemId: string,
+      usageType: string,
+      usageAmountMicros: string | null,
+    ): CanonicalCurLine => ({
+      ...base,
+      lineItemId,
+      service: "Amazon Bedrock",
+      productCode: "AmazonBedrock",
+      productName: "Amazon Bedrock",
+      usageType,
+      usageUnit: "1M Tokens",
+      usageAmountMicros,
+    });
+    const result = build(scoped([
+      bedrock("bedrock-input", "USE1-Claude-InputTokens", "100000000"),
+      bedrock("bedrock-read", "USE1-Claude-CacheReadInputTokens", "50000000"),
+      bedrock("bedrock-write", "USE1-Claude-CacheWriteInputTokens", "25000000"),
+      bedrock("bedrock-read-missing", "USE1-Claude-CacheReadInputTokens", null),
+    ]));
+    assert.equal(result.ok, true);
+    assert.equal(result.bedrockTokens.status, "partial");
+    assert.equal(result.bedrockTokens.classifiedLineCount, 4);
+    assert.equal(result.bedrockTokens.usableLineCount, 3);
+    assert.equal(result.bedrockTokens.missingUsageEvidenceLineCount, 1);
+    assert.equal(result.bedrockTokens.buckets.length, 1);
+    const [bucket] = result.bedrockTokens.buckets;
+    assert.equal(bucket?.ratioStatus, "partial");
+    assert.equal(bucket?.ratioUnavailableReason, "missing_usage_quantity");
+    assert.equal(bucket?.cacheReadRatioBasisPoints, null);
+    assert.equal(bucket?.cacheWriteRatioBasisPoints, null);
   });
 
   it("is deterministic across input ordering with stable trends and rankings", () => {

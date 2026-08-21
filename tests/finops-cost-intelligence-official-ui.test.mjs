@@ -17,9 +17,11 @@ test("native Cost Intelligence workspace renders official sheets and decision vi
     server: { middlewareMode: true },
   });
   try {
-    const [panel, definition] = await Promise.all([
+    const [panel, definition, sheets, endpoint] = await Promise.all([
       vite.ssrLoadModule("/app/costs/finops-foundational-panels.tsx"),
       vite.ssrLoadModule("/lib/finops-cost-intelligence-official-definition.ts"),
+      vite.ssrLoadModule("/app/costs/finops-cost-intelligence-sheets-dashboard.tsx"),
+      vite.ssrLoadModule("/app/costs/finops-foundational-endpoint.ts"),
     ]);
     const auditHtml = renderToStaticMarkup(createElement(
       panel.CostIntelligenceOfficialEvidence,
@@ -156,6 +158,104 @@ test("native Cost Intelligence workspace renders official sheets and decision vi
       "No expiring commitment evidence was observed",
     ]) assert.match(html, new RegExp(expected, "iu"), expected);
     assert.doesNotMatch(html, /fixture|placeholder|sample data/iu);
+
+    const controlsHtml = renderToStaticMarkup(createElement(
+      sheets.FinopsCostIntelligenceSheetsDashboard,
+      { connectionId: null },
+    ));
+    for (const expected of [
+      "Cost Intelligence OPTICS controls",
+      "Cost basis",
+      "Group by level 1",
+      "Group by level 2",
+      "Explorer month",
+      "Result limit",
+      "Add exact filter",
+      "Apply controls",
+      "Database engine",
+      "instance type family",
+    ]) assert.match(controlsHtml, new RegExp(expected, "iu"), expected);
+
+    const opticsUrl = new URL(endpoint.costIntelligenceRequestUrl(
+      `conn_${"a".repeat(32)}`,
+      {
+        costBasis: "amortized",
+        allocationMode: "showback",
+        moverDimension: "service",
+        pivotRow: "operation",
+        pivotColumn: "usage_type",
+        explorerPeriod: "2026-07",
+        explorerLimit: 100,
+        explorerFilters: [
+          { dimension: "service", value: "AmazonEC2" },
+          { dimension: "operation", value: "RunInstances:001" },
+        ],
+      },
+    ), "https://www.sutracmdb.com");
+    assert.equal(opticsUrl.searchParams.get("explorerPeriod"), "2026-07");
+    assert.equal(opticsUrl.searchParams.get("explorerLimit"), "100");
+    assert.deepEqual(opticsUrl.searchParams.getAll("explorerFilter"), [
+      "service:AmazonEC2",
+      "operation:RunInstances:001",
+    ]);
+    assert.equal(opticsUrl.searchParams.has("organizationId"), false);
+    assert.equal(opticsUrl.searchParams.has("customerId"), false);
+
+    const usagePivotHtml = renderToStaticMarkup(createElement(
+      sheets.FinopsCostIntelligenceSheetContent,
+      {
+        sheet: { key: "mom-pivot", name: "MoM Pivot" },
+        report: {
+          momPivot: {
+            baselinePeriod: "2026-06",
+            comparisonPeriod: "2026-07",
+            dimensions: ["service", "account"],
+            cells: [{
+              currency: "USD",
+              rowValue: "AmazonEC2",
+              columnValue: "111122223333",
+              baselineMicros: "1000000",
+              comparisonMicros: "2000000",
+              deltaMicros: "1000000",
+              deltaPercentBasisPoints: "10000",
+            }],
+          },
+          usageMomPivot: {
+            status: "partial",
+            reason: "missing_usage_quantity_or_unit",
+            baselinePeriod: "2026-06",
+            comparisonPeriod: "2026-07",
+            dimensions: ["service", "account"],
+            eligibleLineCount: 3,
+            usableLineCount: 2,
+            missingEvidenceLineCount: 1,
+            cells: [{
+              currency: "USD",
+              usageUnit: "Hrs",
+              rowValue: "AmazonEC2",
+              columnValue: "111122223333",
+              baselineQuantityMicros: "2000000",
+              comparisonQuantityMicros: "5000000",
+              deltaQuantityMicros: "3000000",
+              deltaPercentBasisPoints: "15000",
+              baselineLineCount: 1,
+              comparisonLineCount: 1,
+            }],
+          },
+        },
+      },
+    ));
+    for (const expected of [
+      "Month-over-month spend pivot",
+      "Month-over-month usage quantity pivot",
+      "Partial usage quantity evidence",
+      "1 of 3 usage lines lacked",
+      "2 Hrs",
+      "5 Hrs",
+      "3 Hrs",
+      "150.00%",
+    ]) assert.match(usagePivotHtml, new RegExp(expected, "iu"), expected);
+    assert.doesNotMatch(usagePivotHtml, />0 Hrs</u);
   } finally {
     await vite.close();
   }

@@ -41,11 +41,20 @@ export const FINOPS_COST_DIMENSIONS = [
   ...FINOPS_TAXONOMY_DIMENSIONS,
   "service",
   "product",
+  "product_family",
   "region",
+  "availability_zone",
+  "operation",
+  "usage_type",
+  "pricing_unit",
   "charge_kind",
+  "charge_category",
   "billing_entity",
   "legal_entity",
   "commitment_type",
+  "purchase_option",
+  "payer_account",
+  "account_name",
 ] as const;
 export type FinopsCostDimension = typeof FINOPS_COST_DIMENSIONS[number];
 
@@ -278,6 +287,40 @@ export interface FinopsMomPivotCell {
   readonly deltaPercentBasisPoints: string | null;
 }
 
+export interface FinopsMomUsagePivotCell {
+  /** Billing currency is retained as a scope key even though the measure is usage. */
+  readonly currency: string;
+  readonly usageUnit: string;
+  readonly rowDimension: FinopsCostDimension;
+  readonly rowValue: string;
+  readonly columnDimension: FinopsCostDimension;
+  readonly columnValue: string;
+  /** Null means no compatible quantity was observed for this cell/period. */
+  readonly baselineQuantityMicros: string | null;
+  /** Null means no compatible quantity was observed for this cell/period. */
+  readonly comparisonQuantityMicros: string | null;
+  /** Available only when both periods carry the same explicit usage unit. */
+  readonly deltaQuantityMicros: string | null;
+  readonly deltaPercentBasisPoints: string | null;
+  readonly baselineLineCount: number;
+  readonly comparisonLineCount: number;
+}
+
+export interface FinopsMomUsagePivot {
+  readonly status: "available" | "partial" | "unavailable";
+  readonly reason:
+    | "no_usage_rows"
+    | "missing_usage_quantity_or_unit"
+    | null;
+  readonly baselinePeriod: string;
+  readonly comparisonPeriod: string;
+  readonly dimensions: readonly [FinopsCostDimension, FinopsCostDimension];
+  readonly eligibleLineCount: number;
+  readonly usableLineCount: number;
+  readonly missingEvidenceLineCount: number;
+  readonly cells: readonly FinopsMomUsagePivotCell[];
+}
+
 export interface FinopsExplorerGroup {
   readonly currency: string;
   readonly dimensions: readonly {
@@ -377,6 +420,7 @@ export interface FinopsCostIntelligenceReport {
     readonly dimensions: readonly [FinopsCostDimension, FinopsCostDimension];
     readonly cells: readonly FinopsMomPivotCell[];
   };
+  readonly usageMomPivot: FinopsMomUsagePivot;
   readonly explorer: {
     readonly period: string;
     readonly groups: readonly FinopsExplorerGroup[];
@@ -435,6 +479,13 @@ interface MutableGroup {
   lines: number;
 }
 
+interface MutableUsageGroup {
+  baseline: bigint;
+  comparison: bigint;
+  baselineLines: number;
+  comparisonLines: number;
+}
+
 function failure(
   code: FinopsCostIntelligenceFailureCode,
   field: string,
@@ -479,10 +530,18 @@ function validLineShape(value: unknown): value is CanonicalCurLine {
   const optionalTextFields = [
     value.productCode,
     value.productName,
+    value.productFamily,
     value.region,
+    value.availabilityZone,
+    value.operation,
+    value.usageType,
+    value.usageUnit,
     value.billingEntity,
     value.legalEntity,
     value.commitmentType,
+    value.commitmentPurchaseOption,
+    value.payerAccountId,
+    value.usageAccountName,
   ];
   return validText(value.lineItemId, 4_096)
     && validText(value.usageAccountId)
@@ -611,11 +670,20 @@ function dimensionValue(
   switch (dimension) {
     case "service": return line.service || UNALLOCATED;
     case "product": return line.productCode ?? line.productName ?? UNALLOCATED;
+    case "product_family": return line.productFamily ?? UNALLOCATED;
     case "region": return line.region ?? UNALLOCATED;
+    case "availability_zone": return line.availabilityZone ?? UNALLOCATED;
+    case "operation": return line.operation ?? UNALLOCATED;
+    case "usage_type": return line.usageType ?? UNALLOCATED;
+    case "pricing_unit": return line.usageUnit ?? UNALLOCATED;
     case "charge_kind": return line.chargeKind;
+    case "charge_category": return line.chargeCategory;
     case "billing_entity": return line.billingEntity ?? UNALLOCATED;
     case "legal_entity": return line.legalEntity ?? UNALLOCATED;
     case "commitment_type": return line.commitmentType ?? UNALLOCATED;
+    case "purchase_option": return line.commitmentPurchaseOption ?? UNALLOCATED;
+    case "payer_account": return line.payerAccountId ?? UNALLOCATED;
+    case "account_name": return line.usageAccountName ?? UNALLOCATED;
   }
 }
 
@@ -888,6 +956,120 @@ function buildPivot(
     || left.rowValue.localeCompare(right.rowValue)
     || left.columnValue.localeCompare(right.columnValue)
   ));
+}
+
+/**
+ * Build the official MoM usage view without treating quantity as money.
+ *
+ * Every cell is keyed by billing currency and the source usage unit. Missing
+ * quantity/unit evidence is counted and changes the whole projection to
+ * `partial`; it is never filled with a zero or derived from cost. A null side
+ * means no compatible quantity was observed for that cell/period, so a delta
+ * is withheld.
+ */
+function buildUsagePivot(
+  rows: readonly PreparedRow[],
+  baseline: string,
+  comparison: string,
+  dimensions: readonly [FinopsCostDimension, FinopsCostDimension],
+  taxonomy: TaxonomyIndex,
+): FinopsMomUsagePivot | null {
+  const totals = new Map<string, MutableUsageGroup>();
+  let eligibleLineCount = 0;
+  let usableLineCount = 0;
+  let missingEvidenceLineCount = 0;
+  for (const row of rows) {
+    if (
+      !row.included
+      || (row.period !== baseline && row.period !== comparison)
+      || row.scoped.line.chargeKind !== "usage"
+    ) continue;
+    eligibleLineCount += 1;
+    const { usageAmountMicros, usageUnit } = row.scoped.line;
+    if (
+      usageAmountMicros === null
+      || !INTEGER.test(usageAmountMicros)
+      || usageUnit === null
+      || !validText(usageUnit, 64)
+    ) {
+      missingEvidenceLineCount += 1;
+      continue;
+    }
+    usableLineCount += 1;
+    const rowValue = dimensionValue(dimensions[0], row.scoped.line, taxonomy);
+    const columnValue = dimensionValue(dimensions[1], row.scoped.line, taxonomy);
+    const key = groupKey([
+      row.scoped.line.currency,
+      usageUnit,
+      rowValue,
+      columnValue,
+    ]);
+    const group = totals.get(key) ?? {
+      baseline: BigInt(0),
+      comparison: BigInt(0),
+      baselineLines: 0,
+      comparisonLines: 0,
+    };
+    if (row.period === baseline) {
+      group.baseline += BigInt(usageAmountMicros);
+      group.baselineLines += 1;
+    } else {
+      group.comparison += BigInt(usageAmountMicros);
+      group.comparisonLines += 1;
+    }
+    totals.set(key, group);
+  }
+  if (totals.size > MAX_PIVOT_CELLS) return null;
+  const status = eligibleLineCount === 0 || usableLineCount === 0
+    ? "unavailable" as const
+    : missingEvidenceLineCount > 0
+      ? "partial" as const
+      : "available" as const;
+  const reason = eligibleLineCount === 0
+    ? "no_usage_rows" as const
+    : missingEvidenceLineCount > 0 || usableLineCount === 0
+      ? "missing_usage_quantity_or_unit" as const
+      : null;
+  return {
+    status,
+    reason,
+    baselinePeriod: baseline,
+    comparisonPeriod: comparison,
+    dimensions,
+    eligibleLineCount,
+    usableLineCount,
+    missingEvidenceLineCount,
+    cells: [...totals.entries()].map(([key, group]) => {
+      const [currency = "", usageUnit = "", rowValue = "", columnValue = ""] =
+        key.split("\0");
+      const baselineQuantity = group.baselineLines > 0 ? group.baseline : null;
+      const comparisonQuantity = group.comparisonLines > 0 ? group.comparison : null;
+      const delta = baselineQuantity === null || comparisonQuantity === null
+        ? null
+        : comparisonQuantity - baselineQuantity;
+      return {
+        currency,
+        usageUnit,
+        rowDimension: dimensions[0],
+        rowValue,
+        columnDimension: dimensions[1],
+        columnValue,
+        baselineQuantityMicros: baselineQuantity?.toString() ?? null,
+        comparisonQuantityMicros: comparisonQuantity?.toString() ?? null,
+        deltaQuantityMicros: delta?.toString() ?? null,
+        deltaPercentBasisPoints: delta === null || baselineQuantity === null
+          ? null
+          : percentBasisPoints(delta, baselineQuantity),
+        baselineLineCount: group.baselineLines,
+        comparisonLineCount: group.comparisonLines,
+      };
+    }).sort((left, right) => (
+      left.currency.localeCompare(right.currency)
+      || left.usageUnit.localeCompare(right.usageUnit)
+      || left.rowValue.localeCompare(right.rowValue)
+      || left.columnValue.localeCompare(right.columnValue)
+    )),
+  };
 }
 
 function explorerGroups(
@@ -1500,6 +1682,16 @@ export function buildFinopsCostIntelligence(
     taxonomy,
   );
   if (pivot === null) return rejected([failure("HIGH_CARDINALITY", "momPivot")]);
+  const usagePivot = buildUsagePivot(
+    prepared,
+    baseline,
+    comparison,
+    input.pivotDimensions,
+    taxonomy,
+  );
+  if (usagePivot === null) {
+    return rejected([failure("HIGH_CARDINALITY", "usageMomPivot")]);
+  }
 
   let explorerResult: FinopsCostIntelligenceReport["explorer"] = null;
   if (explorer !== undefined) {
@@ -1545,6 +1737,7 @@ export function buildFinopsCostIntelligence(
       dimensions: input.pivotDimensions,
       cells: pivot,
     },
+    usageMomPivot: usagePivot,
     explorer: explorerResult,
     forecasts: buildForecasts(prepared, periods, input.forecast),
     commitments: {

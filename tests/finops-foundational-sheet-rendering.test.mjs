@@ -40,7 +40,8 @@ const CUDOS_REPORT = {
     organizationId: "org_1", customerId: "cus_1", connectionId: `conn_${"a".repeat(32)}`,
     exportName: "foundational-cur2-export-v1", billingPeriod: "2026-07",
     generationId: `fbg_${"b".repeat(64)}`, activeLineCount: 4210,
-    sourceFormats: ["parquet"], currencies: ["USD"], evidenceWindow: null,
+    sourceFormats: [{ sourceFormat: "aws-cur", sourceVersion: "2.0", lineCount: 4210 }],
+    currencies: ["USD"], evidenceWindow: null,
   },
   executive: [{
     currency: "USD", lineCount: 4210, accountCount: 12, serviceCount: 34,
@@ -333,6 +334,15 @@ test("CUDOS prints exact micro amounts and keeps credits negative", () => {
   assert.ok(billing.includes("Proven absent"));
 });
 
+test("CUDOS lineage formats the canonical source identity object", () => {
+  const html = render(cudos.FinopsCudosSheetContent, {
+    report: CUDOS_REPORT,
+    sheet: sheets.findSheet(sheets.FINOPS_CUDOS_SHEETS, "about"),
+  });
+  assert.ok(html.includes("aws-cur 2.0 (4,210 lines)"));
+  assert.equal(html.includes("[object Object]"), false);
+});
+
 test("a CUDOS trend gap is a gap, never a zero", () => {
   const html = render(cudos.FinopsCudosSheetContent, {
     report: CUDOS_REPORT,
@@ -374,6 +384,24 @@ test("CUDOS AI/ML renders Bedrock token usage and cache ratios without invented 
   assert.ok(html.includes("14.28%"));
   assert.ok(html.includes("Unavailable"), "unobserved output tokens must not render as zero");
   assert.ok(html.includes("Bedrock Cache Cost Savings % — withheld"));
+});
+
+test("CUDOS AI/ML explains a compatible missing quantity and withholds its ratios", () => {
+  const report = structuredClone(CUDOS_REPORT);
+  report.bedrockTokens.status = "partial";
+  report.bedrockTokens.missingUsageEvidenceLineCount = 1;
+  report.bedrockTokens.buckets[0].ratioStatus = "partial";
+  report.bedrockTokens.buckets[0].cacheReadRatioBasisPoints = null;
+  report.bedrockTokens.buckets[0].cacheWriteRatioBasisPoints = null;
+  report.bedrockTokens.buckets[0].ratioUnavailableReason =
+    "missing_usage_quantity";
+  const html = render(cudos.FinopsCudosSheetContent, {
+    report,
+    sheet: sheets.findSheet(sheets.FINOPS_CUDOS_SHEETS, "ai-ml"),
+  });
+  assert.ok(html.includes("missing usage quantity"));
+  assert.equal(html.includes("28.57%"), false);
+  assert.equal(html.includes("14.28%"), false);
 });
 
 test("every Cost Intelligence sheet renders content", () => {
@@ -448,15 +476,18 @@ test("an unmeasured KPI states its reason instead of showing a value", () => {
   );
 });
 
-test("KPI goals are presented read-only with their authorization evidence", () => {
+test("KPI goals expose governed mutation and immutable history with authorization evidence", () => {
   const html = render(kpi.FinopsKpiSheetContent, {
     report: KPI_REPORT,
     sheet: sheets.findSheet(sheets.FINOPS_KPI_SHEETS, "set-kpi-goals"),
     goalsConfigured: 7,
   });
-  assert.ok(html.includes("read-only"), "the goals panel must state that it does not mutate");
+  assert.ok(html.includes("Governed goal change"), "the governed mutation panel must render");
+  assert.ok(html.includes("Save immutable version"), "the immutable save action must render");
+  assert.ok(html.includes("Goal version history"), "the immutable history panel must render");
   assert.ok(html.includes("dec-0"), "the authorization decision must be shown");
   assert.ok(html.includes("50.00%"), "the exact target must be shown");
+  assert.equal(html.includes("deliberately read-only"), false);
 });
 
 test("KPI withholds a savings estimate with no approved assumption", () => {

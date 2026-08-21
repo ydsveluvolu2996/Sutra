@@ -692,7 +692,9 @@ function AboutSheet({ report }: { readonly report: CudosReport }) {
           Export {report.evidence.exportName} · generation {report.evidence.generationId}
           {report.evidence.sourceFormats.length === 0
             ? ""
-            : ` · formats ${report.evidence.sourceFormats.join(", ")}`}
+            : ` · formats ${report.evidence.sourceFormats.map((source) =>
+                `${source.sourceFormat} ${source.sourceVersion} (${formatCount(source.lineCount)} lines)`
+              ).join(", ")}`}
         </p>
       </FinopsSheetBlock>
 

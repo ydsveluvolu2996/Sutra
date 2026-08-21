@@ -309,6 +309,106 @@ describe("buildFinopsCostIntelligence", () => {
     assert.equal(ec2Cell?.columnValue, ACCOUNT_A);
     assert.equal(ec2Cell?.deltaMicros, "50000000");
     assert.equal(ec2Cell?.deltaPercentBasisPoints, "5000");
+    assert.equal(report.usageMomPivot.status, "unavailable");
+    assert.equal(report.usageMomPivot.reason, "missing_usage_quantity_or_unit");
+    assert.equal(report.usageMomPivot.cells.length, 0);
+  });
+
+  it("builds a unit-separated MoM quantity pivot and discloses incomplete quantity evidence", () => {
+    const juneScope = scope("2026-06", "1");
+    const julyScope = scope("2026-07", "2");
+    const completePeriods = [
+      billingPeriod(juneScope, [
+        canonicalLine("2026-06", "hours-old", ACCOUNT_A, "AmazonEC2", "4.00", "USD", {
+          usageAmountMicros: "2000000",
+          usageUnit: "Hrs",
+          usageType: "USE1-BoxUsage:m7g.large",
+        }),
+        canonicalLine("2026-06", "requests-old", ACCOUNT_A, "AmazonEC2", "1.00", "USD", {
+          usageAmountMicros: "3000000",
+          usageUnit: "Requests",
+          usageType: "Requests-Tier1",
+        }),
+        canonicalLine("2026-06", "euro-hours-old", ACCOUNT_A, "AmazonEC2", "4.00", "EUR", {
+          usageAmountMicros: "11000000",
+          usageUnit: "Hrs",
+          usageType: "USE1-BoxUsage:m7g.large",
+        }),
+      ]),
+      billingPeriod(julyScope, [
+        canonicalLine("2026-07", "hours-new", ACCOUNT_A, "AmazonEC2", "8.00", "USD", {
+          usageAmountMicros: "5000000",
+          usageUnit: "Hrs",
+          usageType: "USE1-BoxUsage:m7g.large",
+        }),
+        canonicalLine("2026-07", "requests-new", ACCOUNT_A, "AmazonEC2", "2.00", "USD", {
+          usageAmountMicros: "7000000",
+          usageUnit: "Requests",
+          usageType: "Requests-Tier1",
+        }),
+        canonicalLine("2026-07", "euro-hours-new", ACCOUNT_A, "AmazonEC2", "8.00", "EUR", {
+          usageAmountMicros: "13000000",
+          usageUnit: "Hrs",
+          usageType: "USE1-BoxUsage:m7g.large",
+        }),
+      ]),
+    ];
+    const complete = requireReport(buildFinopsCostIntelligence(input(completePeriods)));
+    assert.equal(complete.usageMomPivot.status, "available");
+    assert.equal(complete.usageMomPivot.reason, null);
+    assert.equal(complete.usageMomPivot.eligibleLineCount, 6);
+    assert.equal(complete.usageMomPivot.usableLineCount, 6);
+    assert.equal(complete.usageMomPivot.missingEvidenceLineCount, 0);
+    assert.deepEqual(complete.usageMomPivot.cells.map((cell) => ({
+      currency: cell.currency,
+      unit: cell.usageUnit,
+      baseline: cell.baselineQuantityMicros,
+      comparison: cell.comparisonQuantityMicros,
+      delta: cell.deltaQuantityMicros,
+      bps: cell.deltaPercentBasisPoints,
+    })), [
+      {
+        currency: "EUR",
+        unit: "Hrs",
+        baseline: "11000000",
+        comparison: "13000000",
+        delta: "2000000",
+        bps: "1818",
+      },
+      {
+        currency: "USD",
+        unit: "Hrs",
+        baseline: "2000000",
+        comparison: "5000000",
+        delta: "3000000",
+        bps: "15000",
+      },
+      {
+        currency: "USD",
+        unit: "Requests",
+        baseline: "3000000",
+        comparison: "7000000",
+        delta: "4000000",
+        bps: "13333",
+      },
+    ], "unlike source units remain independent");
+
+    const partial = requireReport(buildFinopsCostIntelligence(input([
+      completePeriods[0]!,
+      billingPeriod(julyScope, [
+        ...completePeriods[1]!.rows.map(({ line }) => line),
+        canonicalLine("2026-07", "missing-quantity", ACCOUNT_A, "AmazonEC2", "3.00", "USD", {
+          usageAmountMicros: null,
+          usageUnit: null,
+        }),
+      ]),
+    ])));
+    assert.equal(partial.usageMomPivot.status, "partial");
+    assert.equal(partial.usageMomPivot.reason, "missing_usage_quantity_or_unit");
+    assert.equal(partial.usageMomPivot.missingEvidenceLineCount, 1);
+    assert.equal(partial.usageMomPivot.cells.some((cell) => (
+      cell.baselineQuantityMicros === "0" || cell.comparisonQuantityMicros === "0"
+    )), false, "an absent or partial period is never rendered as a quantity zero");
   });
 
   it("keeps monetary arithmetic exact above Number limits and fails rather than substituting a missing basis", () => {
@@ -406,7 +506,13 @@ describe("buildFinopsCostIntelligence", () => {
       ]),
       billingPeriod(julyScope, [
         canonicalLine("2026-07", "a", ACCOUNT_A, "ServiceA", "1.00"),
-        canonicalLine("2026-07", "b", ACCOUNT_A, "ServiceB", "1.00"),
+        canonicalLine("2026-07", "b", ACCOUNT_A, "ServiceB", "1.00", "USD", {
+          operation: "RunInstances",
+          usageType: "USE1-BoxUsage:m7g.large",
+          usageUnit: "Hrs",
+          productFamily: "Compute Instance",
+          availabilityZone: "us-east-1a",
+        }),
         canonicalLine("2026-07", "c", ACCOUNT_A, "ServiceC", "1.00"),
       ]),
     ];
@@ -419,6 +525,21 @@ describe("buildFinopsCostIntelligence", () => {
     })));
     assert.deepEqual(safe.explorer?.groups.map((group) =>
       group.dimensions[0]?.value), ["ServiceA", "ServiceB"]);
+
+    const officialControls = requireReport(buildFinopsCostIntelligence(input(periods, {
+      explorer: {
+        dimensions: ["operation", "usage_type", "pricing_unit"],
+        filters: [
+          { dimension: "product_family", value: "Compute Instance" },
+          { dimension: "availability_zone", value: "us-east-1a" },
+        ],
+      },
+    })));
+    assert.deepEqual(officialControls.explorer?.groups[0]?.dimensions, [
+      { dimension: "operation", value: "RunInstances" },
+      { dimension: "usage_type", value: "USE1-BoxUsage:m7g.large" },
+      { dimension: "pricing_unit", value: "Hrs" },
+    ]);
 
     const arbitraryDimension = buildFinopsCostIntelligence({
       ...input(periods),

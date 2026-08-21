@@ -1,6 +1,7 @@
 import { isCollectableAwsSourceKind } from "../../../../../lib/aws-connection-source";
 import {
   FinopsFoundationalConfigRepository,
+  FinopsFoundationalConfigRepositoryError,
   type FinopsFoundationalTenantScope,
   type SaveFinopsKpiGoalInput,
 } from "../../../../../db/finops-foundational-config-repository";
@@ -8,7 +9,11 @@ import { getConnectionForOrg } from "../../../../../db/pilot-repository";
 import { assertSessionCapability, requireApiSession } from "../../../../../lib/api-auth";
 import { readBoundedJson } from "../../../../../lib/aws-pilot-security";
 import { FINOPS_KPI_FORMULAS, type FinopsKpiId } from "../../../../../lib/finops-kpi";
-import { errorResponse, jsonResponse } from "../../../../../lib/pilot-server";
+import {
+  errorResponse,
+  jsonResponse,
+  PilotServerError,
+} from "../../../../../lib/pilot-server";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +38,28 @@ function invalid(): never {
     new Error("The KPI-goal request is invalid"),
     { code: "INVALID_INPUT", status: 400 },
   );
+}
+
+function publicConfigurationError(error: unknown): unknown {
+  if (!(error instanceof FinopsFoundationalConfigRepositoryError)) return error;
+  if (error.code === "OVERLAPPING_GOAL") {
+    return new PilotServerError(
+      409,
+      "CONFLICT",
+      "The KPI goal overlaps an existing immutable goal version",
+    );
+  }
+  if (error.code === "VERSION_CONFLICT") {
+    return new PilotServerError(
+      409,
+      "CONFLICT",
+      "The KPI goal version changed; reload goal history and try again",
+    );
+  }
+  if (error.code === "SCOPE_NOT_FOUND") {
+    return new PilotServerError(404, "NOT_FOUND", "Cloud connection not found");
+  }
+  return new PilotServerError(400, "INVALID_INPUT", "The KPI-goal request is invalid");
 }
 
 function exactRecord(
@@ -94,7 +121,8 @@ export async function GET(request: Request): Promise<Response> {
     const goals = await new FinopsFoundationalConfigRepository()
       .listKpiGoals(scope);
     return jsonResponse({ connectionId, goals });
-  } catch (error) {
+  } catch (caught) {
+    const error = publicConfigurationError(caught);
     return errorResponse(error);
   }
 }
@@ -171,7 +199,8 @@ export async function POST(request: Request): Promise<Response> {
       saved,
       goals: await repository.listKpiGoals(scope),
     }, { status: 201 });
-  } catch (error) {
+  } catch (caught) {
+    const error = publicConfigurationError(caught);
     return errorResponse(error);
   }
 }
