@@ -232,6 +232,92 @@ describe("Foundational CUDOS pure engine", () => {
       sourceLineIds.length > 0));
   });
 
+  it("projects Bedrock token usage and cache ratios from compatible raw units", () => {
+    const [base] = baseLines();
+    const bedrock = (
+      lineItemId: string,
+      usageType: string,
+      usageAmountMicros: string,
+    ): CanonicalCurLine => ({
+      ...base,
+      lineItemId,
+      service: "Amazon Bedrock",
+      productCode: "AmazonBedrock",
+      productName: "Amazon Bedrock",
+      usageType,
+      usageUnit: "1M Tokens",
+      usageAmountMicros,
+    });
+    const result = build(scoped([
+      bedrock("bedrock-input", "USE1-Claude-InputTokens", "100000000"),
+      bedrock("bedrock-output", "USE1-Claude-OutputTokens", "40000000"),
+      bedrock("bedrock-read", "USE1-Claude-CacheReadInputTokens", "50000000"),
+      bedrock("bedrock-write", "USE1-Claude-CacheWriteInputTokens", "25000000"),
+    ]));
+    assert.equal(result.ok, true);
+    assert.equal(result.bedrockTokens.status, "complete");
+    assert.equal(result.bedrockTokens.classifiedLineCount, 4);
+    assert.equal(result.bedrockTokens.usableLineCount, 4);
+    assert.equal(result.bedrockTokens.buckets.length, 1);
+    const bucket = result.bedrockTokens.buckets[0];
+    assert.equal(bucket.period, "2026-07");
+    assert.equal(bucket.currency, "USD");
+    assert.equal(bucket.usageUnit, "1M Tokens");
+    assert.equal(bucket.usage.input.quantityMicros, "100000000");
+    assert.equal(bucket.usage.output.quantityMicros, "40000000");
+    assert.equal(bucket.usage.cache_read.quantityMicros, "50000000");
+    assert.equal(bucket.usage.cache_write.quantityMicros, "25000000");
+    assert.equal(bucket.cacheReadRatioBasisPoints, "2857");
+    assert.equal(bucket.cacheWriteRatioBasisPoints, "1428");
+    assert.equal(bucket.ratioUnavailableReason, null);
+    assert.equal(
+      result.bedrockTokens.cacheCostSavings.savingsBasisPoints,
+      null,
+    );
+    assert.equal(result.bedrockTokens.cacheCostSavings.status, "unavailable");
+  });
+
+  it("keeps incompatible Bedrock units separate and withholds missing ratios", () => {
+    const [base] = baseLines();
+    const input: CanonicalCurLine = {
+      ...base,
+      lineItemId: "bedrock-input",
+      service: "Amazon Bedrock",
+      productCode: "AmazonBedrock",
+      productName: "Amazon Bedrock",
+      usageType: "USE1-Claude-InputTokens",
+      usageUnit: "1M Tokens",
+      usageAmountMicros: "100000000",
+    };
+    const cacheRead: CanonicalCurLine = {
+      ...input,
+      lineItemId: "bedrock-read",
+      usageType: "USE1-Claude-CacheReadInputTokens",
+      usageUnit: "1K Tokens",
+      usageAmountMicros: "50000000",
+    };
+    const missingQuantity: CanonicalCurLine = {
+      ...input,
+      lineItemId: "bedrock-write-missing",
+      usageType: "USE1-Claude-CacheWriteInputTokens",
+      usageAmountMicros: null,
+    };
+    const result = build(scoped([cacheRead, input, missingQuantity]));
+    assert.equal(result.ok, true);
+    assert.equal(result.bedrockTokens.status, "partial");
+    assert.equal(result.bedrockTokens.classifiedLineCount, 3);
+    assert.equal(result.bedrockTokens.usableLineCount, 2);
+    assert.equal(result.bedrockTokens.missingUsageEvidenceLineCount, 1);
+    assert.equal(result.bedrockTokens.buckets.length, 2);
+    assert.ok(result.bedrockTokens.buckets.every((bucket) =>
+      bucket.cacheReadRatioBasisPoints === null
+      && bucket.cacheWriteRatioBasisPoints === null));
+    assert.deepEqual(
+      result.bedrockTokens.buckets.map(({ usageUnit }) => usageUnit),
+      ["1K Tokens", "1M Tokens"],
+    );
+  });
+
   it("is deterministic across input ordering with stable trends and rankings", () => {
     const rows = scoped(baseLines());
     const forward = build(rows);

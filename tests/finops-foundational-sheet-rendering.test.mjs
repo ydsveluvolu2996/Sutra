@@ -115,6 +115,26 @@ const CUDOS_REPORT = {
     totalMetrics: 1, truncated: false,
     invariant: "currencies_and_usage_units_are_never_combined",
   },
+  bedrockTokens: {
+    status: "complete", classifiedLineCount: 3, usableLineCount: 3,
+    missingUsageEvidenceLineCount: 0,
+    invariant: "currencies_and_raw_usage_units_are_never_normalized_or_combined",
+    buckets: [{
+      period: "2026-07", currency: "USD", usageUnit: "1M Tokens", lineCount: 3,
+      usage: {
+        input: { lineCount: 1, quantityMicros: "100000000" },
+        output: { lineCount: 0, quantityMicros: null },
+        cache_read: { lineCount: 1, quantityMicros: "50000000" },
+        cache_write: { lineCount: 1, quantityMicros: "25000000" },
+      },
+      ratioStatus: "complete", cacheReadRatioBasisPoints: "2857",
+      cacheWriteRatioBasisPoints: "1428", ratioUnavailableReason: null,
+    }],
+    cacheCostSavings: {
+      status: "unavailable", savingsBasisPoints: null,
+      reason: "compatible_uncached_input_rate_is_not_authoritative_in_canonical_rows",
+    },
+  },
   opportunities: {
     estimates: [{
       ruleId: "CUDOS_CUR_EXPLICIT_UNUSED_COMMITMENT", ruleVersion: "1.0.0",
@@ -342,6 +362,20 @@ test("a CUDOS module sheet with no classified line proves absence rather than sh
   assert.equal(html.includes("$0.00"), false, "absence must not be rendered as zero cost");
 });
 
+test("CUDOS AI/ML renders Bedrock token usage and cache ratios without invented evidence", () => {
+  const html = render(cudos.FinopsCudosSheetContent, {
+    report: CUDOS_REPORT,
+    sheet: sheets.findSheet(sheets.FINOPS_CUDOS_SHEETS, "ai-ml"),
+  });
+  assert.ok(html.includes("Amazon Bedrock Tokens Usage per UsageType Group"));
+  assert.ok(html.includes("Amazon Bedrock Tokens Cache Read and Cache Write Ratio"));
+  assert.ok(html.includes("100,000,000 usage micros"));
+  assert.ok(html.includes("28.57%"));
+  assert.ok(html.includes("14.28%"));
+  assert.ok(html.includes("Unavailable"), "unobserved output tokens must not render as zero");
+  assert.ok(html.includes("Bedrock Cache Cost Savings % — withheld"));
+});
+
 test("every Cost Intelligence sheet renders content", () => {
   for (const sheet of sheets.FINOPS_COST_INTELLIGENCE_SHEETS.sheets) {
     const html = render(cid.FinopsCostIntelligenceSheetContent, { report: CID_REPORT, sheet });
@@ -443,7 +477,8 @@ test("the sheet shell exposes real tabs for every official sheet", () => {
   assert.equal((html.match(/role="tabpanel"/gu) ?? []).length, 1);
   assert.equal((html.match(/aria-selected="true"/gu) ?? []).length, 1);
   // The pinned definition totals are shown so the reader knows what is mirrored.
-  assert.ok(html.includes("407"));
+  assert.ok(html.includes("409"));
+  assert.ok(html.includes("v5.9.1"));
   assert.ok(html.includes("19"));
 
   const cidHtml = render(cid.FinopsCostIntelligenceSheets, { envelope: CID_ENVELOPE });

@@ -103,7 +103,7 @@ test("official audits remain visible independently of report readiness and valid
     /stateEnvelope\(kpi\)\?\.officialDefinition[\s\S]*FINOPS_KPI_OFFICIAL_DEFINITION/u,
   );
   for (const identity of [
-    "7f0516c146b1de528e3960305a01b090d2521c020c6f8fba4b756f3a62f444c1",
+    "4db8cd567b3aea50b44f4e7c3d175586799a5aaf3e923db260b570ae56d1aea2",
     "71795647fd09a17c3a2e1ea2f1308d6aecb150efe339a0950866ad766ef10ab0",
     "fd669f207c5589b4b54b981d6d85affb3af449871e908b85a4c1b9b357c35b1a",
     "299c6d39c55c28221b0d0d771358f526931d60fb5f4d00ba4f663d22554b89a1",

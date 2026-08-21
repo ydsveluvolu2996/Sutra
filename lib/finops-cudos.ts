@@ -224,6 +224,54 @@ export interface FinopsCudosUnitCostMetric {
     | null;
 }
 
+export const FINOPS_CUDOS_BEDROCK_TOKEN_CLASSES = [
+  "input",
+  "output",
+  "cache_read",
+  "cache_write",
+] as const;
+
+export type FinopsCudosBedrockTokenClass =
+  typeof FINOPS_CUDOS_BEDROCK_TOKEN_CLASSES[number];
+
+export interface FinopsCudosBedrockTokenBucket {
+  /** UTC calendar month derived from the canonical usage start. */
+  readonly period: string;
+  readonly currency: string;
+  readonly usageUnit: string;
+  readonly lineCount: number;
+  readonly usage: Readonly<Record<FinopsCudosBedrockTokenClass, {
+    readonly lineCount: number;
+    /** Null means that class was not observed; it is never presented as zero. */
+    readonly quantityMicros: string | null;
+  }>>;
+  readonly ratioStatus: FinopsCudosCoverage;
+  readonly cacheReadRatioBasisPoints: string | null;
+  readonly cacheWriteRatioBasisPoints: string | null;
+  readonly ratioUnavailableReason:
+    | "missing_input_tokens"
+    | "missing_cache_read_tokens"
+    | "missing_cache_write_tokens"
+    | "non_positive_or_negative_usage_quantity"
+    | null;
+}
+
+export interface FinopsCudosBedrockTokenEvidence {
+  readonly status: FinopsCudosCoverage;
+  readonly classifiedLineCount: number;
+  readonly usableLineCount: number;
+  readonly missingUsageEvidenceLineCount: number;
+  readonly buckets: readonly FinopsCudosBedrockTokenBucket[];
+  readonly invariant:
+    "currencies_and_raw_usage_units_are_never_normalized_or_combined";
+  readonly cacheCostSavings: {
+    readonly status: "unavailable";
+    readonly savingsBasisPoints: null;
+    readonly reason:
+      "compatible_uncached_input_rate_is_not_authoritative_in_canonical_rows";
+  };
+}
+
 export interface FinopsCudosCommitmentSummary {
   readonly currency: string;
   readonly costBasis: FinopsCudosCostBasis;
@@ -344,6 +392,7 @@ export type FinopsCudosResult =
         readonly truncated: boolean;
         readonly invariant: "currencies_and_usage_units_are_never_combined";
       };
+      readonly bedrockTokens: FinopsCudosBedrockTokenEvidence;
       readonly opportunities: {
         readonly estimates: readonly FinopsCudosOpportunityEstimate[];
         readonly totalCandidates: number;
@@ -402,6 +451,17 @@ interface MutableUnitCost extends MutableAggregate {
   usageQuantity: bigint;
 }
 
+interface MutableBedrockTokenBucket {
+  readonly period: string;
+  readonly currency: string;
+  readonly usageUnit: string;
+  lineCount: number;
+  readonly usage: Record<FinopsCudosBedrockTokenClass, {
+    lineCount: number;
+    quantity: bigint;
+  }>;
+}
+
 interface MutableOpportunity {
   readonly ruleId: FinopsCudosOpportunityRuleId;
   readonly subjectType: FinopsCudosOpportunityEstimate["subjectType"];
@@ -428,6 +488,13 @@ const CHARGE_KINDS = new Set<CurChargeKind>([
   "discount",
   "adjustment",
   "other",
+]);
+
+const BEDROCK_PRODUCT_CODES = new Set([
+  "amazonbedrock",
+  "amazonbedrockagentcore",
+  "amazonbedrockservice",
+  "amazonbedrockfoundationmodels",
 ]);
 
 const MODULE_MATCHERS: Readonly<
@@ -827,6 +894,46 @@ function matchingModules(line: CanonicalCurLine): readonly FinopsCudosModuleId[]
   const text = evidenceText(line);
   return FINOPS_CUDOS_MODULE_IDS.filter((moduleId) =>
     MODULE_MATCHERS[moduleId](text));
+}
+
+function bedrockTokenClass(
+  line: CanonicalCurLine,
+): FinopsCudosBedrockTokenClass | null {
+  const productCode = (line.productCode ?? "").toLowerCase();
+  const productName = (line.productName ?? "").toLowerCase();
+  const service = line.service.toLowerCase();
+  if (
+    !BEDROCK_PRODUCT_CODES.has(productCode)
+    && !productName.includes("bedrock")
+    && !service.includes("bedrock")
+  ) return null;
+
+  const usageType = (line.usageType ?? "").toLowerCase();
+  if (
+    usageType.includes("cacheread")
+    || usageType.includes("cache-read")
+    || usageType.includes("cache_read")
+  ) return "cache_read";
+  if (
+    usageType.includes("cachewrite")
+    || usageType.includes("cache-write")
+    || usageType.includes("cache_write")
+  ) return "cache_write";
+  // AWS publishes batch and reserved token categories separately. They must
+  // not be folded into the on-demand input/output cache denominator.
+  if (usageType.includes("batch") || usageType.includes("reserved")) return null;
+  if (usageType.includes("input")) return "input";
+  if (usageType.includes("output")) return "output";
+  return null;
+}
+
+function newBedrockUsage(): MutableBedrockTokenBucket["usage"] {
+  return {
+    input: { lineCount: 0, quantity: BigInt(0) },
+    output: { lineCount: 0, quantity: BigInt(0) },
+    cache_read: { lineCount: 0, quantity: BigInt(0) },
+    cache_write: { lineCount: 0, quantity: BigInt(0) },
+  };
 }
 
 function boundedLineIds(
@@ -1380,6 +1487,9 @@ export function buildFinopsCudosDashboard(
   const serviceCategoryRankings = new Map<string, MutableRanking>();
   const modules = new Map<FinopsCudosModuleId, MutableModule>();
   const unitCosts = new Map<string, MutableUnitCost>();
+  const bedrockTokenBuckets = new Map<string, MutableBedrockTokenBucket>();
+  let bedrockClassifiedLineCount = 0;
+  let bedrockMissingUsageEvidenceLineCount = 0;
   const opportunityCandidates = new Map<string, MutableOpportunity>();
   const noUsageResources = new Map<string, {
     readonly rows: CanonicalCurLine[];
@@ -1445,6 +1555,30 @@ export function buildFinopsCudosDashboard(
       monthly.set(monthlyKey, monthlyBucket);
     }
     addLineToAggregate(monthlyBucket, line);
+
+    const tokenClass = bedrockTokenClass(line);
+    if (tokenClass !== null) {
+      bedrockClassifiedLineCount += 1;
+      if (line.usageAmountMicros === null || line.usageUnit === null) {
+        bedrockMissingUsageEvidenceLineCount += 1;
+      } else {
+        const key = JSON.stringify([month, line.currency, line.usageUnit]);
+        let bucket = bedrockTokenBuckets.get(key);
+        if (bucket === undefined) {
+          bucket = {
+            period: month,
+            currency: line.currency,
+            usageUnit: line.usageUnit,
+            lineCount: 0,
+            usage: newBedrockUsage(),
+          };
+          bedrockTokenBuckets.set(key, bucket);
+        }
+        bucket.lineCount += 1;
+        bucket.usage[tokenClass].lineCount += 1;
+        bucket.usage[tokenClass].quantity += BigInt(line.usageAmountMicros);
+      }
+    }
 
     const rankingInputs: readonly [
       Map<string, MutableRanking>,
@@ -1584,6 +1718,7 @@ export function buildFinopsCudosDashboard(
       + regionRankings.size
       + serviceCategoryRankings.size
       + unitCosts.size
+      + bedrockTokenBuckets.size
       + noUsageResources.size
       + opportunityCandidates.size;
     const overflow = boundedMap(totalBucketCount);
@@ -1716,6 +1851,72 @@ export function buildFinopsCudosDashboard(
       };
     });
 
+  const materializedBedrockTokenBuckets = [...bedrockTokenBuckets.values()]
+    .sort((left, right) =>
+      compareText(left.currency, right.currency)
+      || compareText(left.usageUnit, right.usageUnit)
+      || compareText(left.period, right.period))
+    .map((bucket): FinopsCudosBedrockTokenBucket => {
+      const input = bucket.usage.input;
+      const cacheRead = bucket.usage.cache_read;
+      const cacheWrite = bucket.usage.cache_write;
+      const ratioUnavailableReason = input.lineCount === 0
+        ? "missing_input_tokens" as const
+        : cacheRead.lineCount === 0
+          ? "missing_cache_read_tokens" as const
+          : cacheWrite.lineCount === 0
+            ? "missing_cache_write_tokens" as const
+            : [input.quantity, cacheRead.quantity, cacheWrite.quantity]
+                .some((quantity) => quantity < BigInt(0))
+                || input.quantity + cacheRead.quantity + cacheWrite.quantity
+                  <= BigInt(0)
+              ? "non_positive_or_negative_usage_quantity" as const
+              : null;
+      const denominator = input.quantity + cacheRead.quantity
+        + cacheWrite.quantity;
+      const materializeUsage = (tokenClass: FinopsCudosBedrockTokenClass) => {
+        const value = bucket.usage[tokenClass];
+        return {
+          lineCount: value.lineCount,
+          quantityMicros: value.lineCount === 0
+            ? null
+            : value.quantity.toString(),
+        };
+      };
+      return {
+        period: bucket.period,
+        currency: bucket.currency,
+        usageUnit: bucket.usageUnit,
+        lineCount: bucket.lineCount,
+        usage: {
+          input: materializeUsage("input"),
+          output: materializeUsage("output"),
+          cache_read: materializeUsage("cache_read"),
+          cache_write: materializeUsage("cache_write"),
+        },
+        ratioStatus: ratioUnavailableReason === null ? "complete" : "partial",
+        cacheReadRatioBasisPoints: ratioUnavailableReason === null
+          ? ratioBasisPoints(cacheRead.quantity, denominator)
+          : null,
+        cacheWriteRatioBasisPoints: ratioUnavailableReason === null
+          ? ratioBasisPoints(cacheWrite.quantity, denominator)
+          : null,
+        ratioUnavailableReason,
+      };
+    });
+  const bedrockUsableLineCount = materializedBedrockTokenBuckets.reduce(
+    (sum, bucket) => sum + bucket.lineCount,
+    0,
+  );
+  const bedrockStatus: FinopsCudosCoverage =
+    materializedBedrockTokenBuckets.length === 0
+      ? "unavailable"
+      : bedrockMissingUsageEvidenceLineCount === 0
+          && materializedBedrockTokenBuckets.every(({ ratioStatus }) =>
+            ratioStatus === "complete")
+        ? "complete"
+        : "partial";
+
   const rowsByCurrency = new Map<string, CanonicalCurLine[]>();
   for (const { line } of rows) {
     const current = rowsByCurrency.get(line.currency) ?? [];
@@ -1809,6 +2010,21 @@ export function buildFinopsCudosDashboard(
       totalMetrics: materializedUnitCosts.length,
       truncated: materializedUnitCosts.length > MAX_UNIT_COST_METRICS,
       invariant: "currencies_and_usage_units_are_never_combined",
+    },
+    bedrockTokens: {
+      status: bedrockStatus,
+      classifiedLineCount: bedrockClassifiedLineCount,
+      usableLineCount: bedrockUsableLineCount,
+      missingUsageEvidenceLineCount: bedrockMissingUsageEvidenceLineCount,
+      buckets: materializedBedrockTokenBuckets,
+      invariant:
+        "currencies_and_raw_usage_units_are_never_normalized_or_combined",
+      cacheCostSavings: {
+        status: "unavailable",
+        savingsBasisPoints: null,
+        reason:
+          "compatible_uncached_input_rate_is_not_authoritative_in_canonical_rows",
+      },
     },
     opportunities: {
       estimates: opportunities.slice(0, options.opportunityLimit),

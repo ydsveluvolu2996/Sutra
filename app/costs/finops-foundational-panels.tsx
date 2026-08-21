@@ -404,14 +404,15 @@ export function validCudosEnvelope(value: Readonly<Record<string, unknown>>): bo
     && isRecord(value.officialDefinition)
     && isRecord(value.officialDefinition.source)
     && value.officialDefinition.source.commit
-      === "f9e36d88c47709f10e8fa784ad11d5cc0e728021"
+      === "9cecc158b81504344cf96b38d5918b6953b2e97d"
     && value.officialDefinition.source.path
       === "dashboards/cudos/CUDOS-v5-definition.yaml"
     && value.officialDefinition.source.sha256
-      === "7f0516c146b1de528e3960305a01b090d2521c020c6f8fba4b756f3a62f444c1"
+      === "4db8cd567b3aea50b44f4e7c3d175586799a5aaf3e923db260b570ae56d1aea2"
+    && value.officialDefinition.source.version === "v5.9.1"
     && isRecord(value.officialDefinition.totals)
     && value.officialDefinition.totals.sheets === 19
-    && value.officialDefinition.totals.visuals === 407
+    && value.officialDefinition.totals.visuals === 409
     && Array.isArray(value.officialDefinition.sheets)
     && value.officialDefinition.sheets.length === 19;
 }

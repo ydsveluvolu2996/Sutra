@@ -93,6 +93,12 @@ function NoEvidence({ reason }: { readonly reason: string }) {
   );
 }
 
+function formatUsageMicros(value: string | null): string {
+  return value === null
+    ? "Unavailable"
+    : `${BigInt(value).toLocaleString("en-US")} usage micros`;
+}
+
 /** Trends: three official cadences, each a real time series. */
 function TrendsSheet({ report }: { readonly report: CudosReport }) {
   const basis = report.selectedCostBasis;
@@ -402,6 +408,160 @@ function ModuleSheet({
   );
 }
 
+/** AWS CUDOS v5.9.1 Bedrock token/cache additions on canonical CUR evidence. */
+function BedrockTokensSheet({ report }: { readonly report: CudosReport }) {
+  const evidence = report.bedrockTokens;
+  if (evidence.buckets.length === 0) {
+    return (
+      <div className={styles.blocks}>
+        <NoEvidence
+          reason={evidence.missingUsageEvidenceLineCount > 0
+            ? `${formatCount(evidence.missingUsageEvidenceLineCount)} classified Bedrock token lines lack a usage quantity or raw usage unit. Ratios are unavailable rather than zero.`
+            : "No canonical Bedrock input, output, cache-read, or cache-write token usage was observed with a quantity and raw usage unit. Ratios are unavailable rather than zero."}
+        />
+        <FinopsSheetBlock
+          description="Sutra does not infer the uncached input-token rate needed by AWS's calculated savings formula."
+          title="Bedrock Cache Cost Savings % — withheld"
+        >
+          <p className={styles.goalMeta}>
+            {evidence.cacheCostSavings.reason.replace(/_/gu, " ")}.
+          </p>
+        </FinopsSheetBlock>
+      </div>
+    );
+  }
+
+  const groups = [...new Set(evidence.buckets.map((bucket) =>
+    `${bucket.currency}\0${bucket.usageUnit}`))]
+    .sort()
+    .map((key) => {
+      const [currency, usageUnit] = key.split("\0");
+      return {
+        currency: currency ?? "",
+        usageUnit: usageUnit ?? "",
+        buckets: evidence.buckets.filter((bucket) =>
+          bucket.currency === currency && bucket.usageUnit === usageUnit),
+      };
+    });
+
+  return (
+    <div className={styles.blocks}>
+      {groups.map((group) => (
+        <FinopsSheetBlock
+          description={`Canonical raw token quantities in ${group.usageUnit} for ${group.currency}. Raw units and currencies are never normalized or combined.`}
+          key={`usage-${group.currency}-${group.usageUnit}`}
+          title="Amazon Bedrock Tokens Usage per UsageType Group"
+        >
+          <BarChart
+            ariaLabel={`Amazon Bedrock token usage by usage type in ${group.usageUnit} for ${group.currency}`}
+            categories={group.buckets.map(({ period }) => period)}
+            formatValue={(value) => `${value.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${group.usageUnit}`}
+            series={[
+              { id: "input", label: "Input Tokens", values: group.buckets.map((bucket) => microsToUnits(bucket.usage.input.quantityMicros)) },
+              { id: "output", label: "Output Tokens", values: group.buckets.map((bucket) => microsToUnits(bucket.usage.output.quantityMicros)) },
+              { id: "cache-read", label: "Cache Read Input Tokens", values: group.buckets.map((bucket) => microsToUnits(bucket.usage.cache_read.quantityMicros)) },
+              { id: "cache-write", label: "Cache Write Input Tokens", values: group.buckets.map((bucket) => microsToUnits(bucket.usage.cache_write.quantityMicros)) },
+            ]}
+          />
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <caption>
+                Exact source quantities. An unobserved token class is unavailable,
+                never a fabricated zero.
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">Month</th>
+                  <th className={styles.numeric} scope="col">Input</th>
+                  <th className={styles.numeric} scope="col">Output</th>
+                  <th className={styles.numeric} scope="col">Cache read</th>
+                  <th className={styles.numeric} scope="col">Cache write</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.buckets.map((bucket) => (
+                  <tr key={`${bucket.period}-${bucket.currency}-${bucket.usageUnit}`}>
+                    <th scope="row">{bucket.period}</th>
+                    <td className={styles.numeric}>{formatUsageMicros(bucket.usage.input.quantityMicros)}</td>
+                    <td className={styles.numeric}>{formatUsageMicros(bucket.usage.output.quantityMicros)}</td>
+                    <td className={styles.numeric}>{formatUsageMicros(bucket.usage.cache_read.quantityMicros)}</td>
+                    <td className={styles.numeric}>{formatUsageMicros(bucket.usage.cache_write.quantityMicros)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </FinopsSheetBlock>
+      ))}
+
+      {groups.map((group) => (
+        <FinopsSheetBlock
+          description={`Share of compatible input-token evidence in ${group.usageUnit} for ${group.currency}. A missing class or non-positive quantity withholds the ratio.`}
+          key={`ratio-${group.currency}-${group.usageUnit}`}
+          title="Amazon Bedrock Tokens Cache Read and Cache Write Ratio"
+        >
+          <TimeSeriesChart
+            ariaLabel={`Amazon Bedrock cache read and cache write ratio for ${group.currency} ${group.usageUnit}`}
+            formatValue={formatPercent}
+            mode="line"
+            series={[
+              {
+                id: "cache-read-ratio",
+                label: "Cache read ratio",
+                points: group.buckets.map((bucket) => ({
+                  label: bucket.period,
+                  value: basisPointsToPercent(bucket.cacheReadRatioBasisPoints),
+                })),
+              },
+              {
+                id: "cache-write-ratio",
+                label: "Cache write ratio",
+                points: group.buckets.map((bucket) => ({
+                  label: bucket.period,
+                  value: basisPointsToPercent(bucket.cacheWriteRatioBasisPoints),
+                })),
+              },
+            ]}
+          />
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th scope="col">Month</th>
+                  <th scope="col">Evidence status</th>
+                  <th className={styles.numeric} scope="col">Read ratio</th>
+                  <th className={styles.numeric} scope="col">Write ratio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {group.buckets.map((bucket) => (
+                  <tr key={`${bucket.period}-${bucket.currency}-${bucket.usageUnit}`}>
+                    <th scope="row">{bucket.period}</th>
+                    <td>{bucket.ratioUnavailableReason === null
+                      ? <StateBadge state={bucket.ratioStatus} />
+                      : bucket.ratioUnavailableReason.replace(/_/gu, " ")}</td>
+                    <td className={styles.numeric}>{formatBasisPoints(bucket.cacheReadRatioBasisPoints)}</td>
+                    <td className={styles.numeric}>{formatBasisPoints(bucket.cacheWriteRatioBasisPoints)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </FinopsSheetBlock>
+      ))}
+
+      <FinopsSheetBlock
+        description="The canonical rows do not provide an authoritative compatible uncached input-token rate, so this value is not inferred."
+        title="Bedrock Cache Cost Savings % — withheld"
+      >
+        <p className={styles.goalMeta}>
+          {evidence.cacheCostSavings.reason.replace(/_/gu, " ")}.
+        </p>
+      </FinopsSheetBlock>
+    </div>
+  );
+}
+
 /** Taxonomy explorer: the four official ranking dimensions plus drilldown reach. */
 function TaxonomySheet({ report }: { readonly report: CudosReport }) {
   const basis = report.selectedCostBasis;
@@ -587,6 +747,14 @@ export function FinopsCudosSheetContent({
   report, sheet,
 }: { readonly report: CudosReport; readonly sheet: FinopsSheetDescriptor }) {
   const moduleIds = SHEET_MODULES[sheet.key];
+  if (sheet.key === "ai-ml" && moduleIds !== undefined) {
+    return (
+      <div className={styles.blocks}>
+        <ModuleSheet moduleIds={moduleIds} report={report} sheet={sheet} />
+        <BedrockTokensSheet report={report} />
+      </div>
+    );
+  }
   if (moduleIds !== undefined) {
     return <ModuleSheet moduleIds={moduleIds} report={report} sheet={sheet} />;
   }

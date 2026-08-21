@@ -116,7 +116,7 @@ export const FINOPS_CUDOS_SHEETS: FinopsSheetInventory = inventory(
     commit: FINOPS_CUDOS_OFFICIAL_DEFINITION.source.commit,
     path: FINOPS_CUDOS_OFFICIAL_DEFINITION.source.path,
     sha256: FINOPS_CUDOS_OFFICIAL_DEFINITION.source.sha256,
-    version: null,
+    version: FINOPS_CUDOS_OFFICIAL_DEFINITION.source.version,
   },
 );
 
