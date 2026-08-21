@@ -1,6 +1,6 @@
 # FND-03 — KPI and Modernization Dashboard evidence record
 
-Reviewed: 2026-08-02
+Reviewed: 2026-08-21
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#kpi-dashboard>
 
@@ -34,7 +34,7 @@ The audit pins the AWS public CID repository at commit
 | Official sheet | Visuals | Parameter controls | Filter controls | Native evidence state |
 |---|---:|---:|---:|---|
 | KPI Tracker | 6 | 3 | 2 | Partial: all 19 governed formulas and goal progress are present; savings at goal is withheld without an approved rate assumption. |
-| Set KPI Goals | 8 | 19 | 2 | Partial: all 19 goal families have versioned RBAC-protected persistence; the native dashboard remains read-only. |
+| Set KPI Goals | 8 | 19 | 2 | Partial: all 19 goal families have native versioned mutation, non-overlap validation, RBAC-protected persistence, and explicit goal-history states; provider/live acceptance remains. |
 | Metrics Summary | 14 | 10 | 2 | Partial: selected-period scorecard is present; simultaneous month-over-month pivots are not. |
 | EC2 | 10 | 4 | 8 | Partial: previous-generation, Spot, Graviton and AMD coverage candidates are present; compatibility and savings rankings are withheld. |
 | EBS | 18 | 5 | 2 | Partial: gp3 and snapshot KPIs are present; volume inventory, age and pricing evidence remain required. |
@@ -53,11 +53,11 @@ visual. The native inventory is encoded in
 
 | Gate | Status | Evidence |
 |---|---|---|
-| G0 requirements | `VERIFIED` | Immutable v2.2.1 source, sheet, visual and control inventory above, reviewed 2026-08-02. |
+| G0 requirements | `VERIFIED` | Immutable v2.2.1 source, sheet, visual and control inventory above, reviewed 2026-08-21. |
 | G1–G3 source/pipeline | `IMPLEMENTED_UNVERIFIED` | Active CUR2 generations plus versioned tenant KPI goals and immutable taxonomy publications. |
-| G4 API | `IMPLEMENTED_UNVERIFIED` | Tenant-resolved read-only KPI report with bounded billing-period, linked-account and payer-account filters, plus separately authorized goal-management and taxonomy routes. |
-| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 10-sheet navigation, immutable 91-visual/94-control inventory, versioned 19-formula scorecard, account/payer/period filters, goal state, progress bars, evidence window, sheet-specific formula views, and unavailable/partial disclosures. The immutable official-source audit remains visible in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact commit, version, manifest SHA-256, and definition SHA-256; the local constant is only the no-response fallback. |
-| G6 focused verification | `VERIFIED` | Goal overlap/RBAC, exact formulas, source scope, currencies/units, missing compatibility/savings evidence, routes, migrations, repository, official inventory and UI pass in the focused 32-test set. |
+| G4 API | `IMPLEMENTED_UNVERIFIED` | Tenant-resolved KPI report with bounded billing-period, linked-account and payer-account filters, plus separately authorized goal-management and taxonomy routes. Goal writes validate exact formula/resource scope, integer basis points, version order, and non-overlapping effective windows; repository failures map to bounded 400/404/409 responses. |
+| G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 10-sheet navigation, immutable 91-visual/94-control inventory, versioned 19-formula scorecard and goal mutation, account/payer/period filters, progress bars, evidence window, sheet-specific formula views, complete history loading/empty/failed/permission/conflict/success states, and unavailable/partial disclosures. The immutable official-source audit remains visible in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact commit, version, manifest SHA-256, and definition SHA-256; the local constant is only the no-response fallback. |
+| G6 focused verification | `VERIFIED` | Dashboard-level goal mutation/RBAC, exact formulas, source scope, currencies/units, missing compatibility/savings evidence, report route, official inventory and UI pass in the 19-test focused set. Repository, migrations, shared Foundational UI, and active-generation behavior are included in the 130-test combined matrix; root typecheck, scoped lint, secret scan, diff check, and exact standing-PR CI pass. |
 | G7–G10 | `NOT_STARTED` | Exact-tree, controlled AWS reconciliation, reviewed release, immutable deployment, and live visual acceptance remain. |
 
 ## Evidence-honesty limits
@@ -71,9 +71,33 @@ recommendations remain explicit gaps until their authoritative data sources are
 registered and accepted. The report-independent audit exposes frozen definition
 metadata only and never fabricates spend, usage, savings, or provider evidence.
 
-Focused result: **32 passed, 0 failed, 0 skipped** across the KPI engine, goal
-configuration migrations/repository/routes, exact official definition, native
-SSR view, API contract and shared Foundational UI contract tests.
+Dashboard-focused result at feature commit
+`1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`: **19 passed, 0 failed, 0
+skipped** across the KPI engine, exact official definition, native SSR view,
+report API contract, and the new goal-mutation contract. Goal repository,
+migration, shared Foundational, and active-generation assertions are also
+covered by the 130-test combined feature matrix.
+
+## Governed goal-management closure — 2026-08-21
+
+Feature checkpoint: `1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`
+on `develop`; [standing PR #78 CI run 32493632168](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32493632168)
+passed for that exact SHA. Maturity remains `LOCAL_VERTICAL_CANDIDATE`.
+
+- Added native mutation for every one of the 19 governed formula goals, with an
+  exact percent-to-basis-points parser, next-version calculation, effective
+  window validation, and non-overlap protection.
+- Added full goal-history loading, verified-empty, failed, permission/conflict,
+  and success states. A retry clears stale history before calculating the next
+  version.
+- Requests are same-origin and `no-store`; organization, customer, actor, and
+  authorization scope are server-derived. Client authorization validation now
+  requires exact `finops-kpi:<organization>:<customer>:<connection>:<kpi>`
+  resource equality.
+- No credentials, AWS SDK operation, collector permission, schema, or migration
+  were added. Multi-generation MoM, authoritative inventory/activity/
+  compatibility/pricing sources, exact-tree parity, controlled provider/
+  two-tenant reconciliation, and signed-in live acceptance remain.
 
 ## Merge record — 2026-08-06
 

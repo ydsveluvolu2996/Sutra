@@ -5,6 +5,39 @@ This ledger records implementation checkpoints for the AWS CMDB roadmap in
 catalog entry is not collector coverage, local verification is not live AWS
 acceptance, and absent or failed evidence is never reported as zero.
 
+## Completed checkpoint — Foundational AWS Cloud Intelligence dashboards
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-21 (Asia/Kolkata) |
+| Baseline commit | `05e2eb3a6045303cc6356dbe8d10f572ea376b4a` |
+| Feature commit | `1eb00d50f6b360f0582bf0dbbe15d9fd2478112e` |
+| Branch | `develop` only |
+| Verticals | FND-01 CUDOS, FND-02 Cost Intelligence, and FND-03 KPI and Modernization |
+| Measurable outcome | FND-01 closes incomplete Bedrock-quantity and source-format truth defects; FND-02 adds bounded canonical OPTICS controls and exact currency/unit-separated MoM usage; FND-03 adds governed versioned mutation and full history states for all 19 goals. |
+| Tenant isolation / security | Organization, customer, connection, actor, and authorization scope remain server-derived. Query inputs and exact KPI resource scope fail closed. Same-origin/no-store requests and cross-tenant negative contracts remain enforced. No credential field or AWS secret is stored, logged, or returned. |
+| Truthful state / failure handling | Missing compatible quantities withhold ratios; incomplete usage is partial/unavailable, not zero; raw units and currencies never combine; goal history distinguishes loading, verified empty, failure, permission/conflict, and success. |
+| AWS operations / IAM | No change. All source reads reuse the existing collector boundary and foundational export role; no AWS SDK call moved into the application. |
+| Persistence / migrations | Reused the active-generation billing and versioned KPI-goal repositories. No schema, migration file, migrator, or registry changed. |
+| External acceptance | `PENDING_EXTERNAL_ACCEPTANCE` — no controlled two-tenant/provider reconciliation or signed-in live visual acceptance was available; exact QuickSight geometry is not claimed. |
+| Known remaining gaps | FND-01 provider telemetry/recommendations, cache-savings and commitment authority; FND-02 complete compute/storage and RI/SP evidence plus unambiguous DB/instance/platform fields; FND-03 multi-generation MoM and authoritative inventory/activity/compatibility/pricing evidence; shared fixed-tree, provider, release, and live gates for all three. |
+| Standing PR / CI | [PR #78](https://github.com/ydsveluvolu2996/Sutra/pull/78); [exact CI run 32493632168](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32493632168) passed for `1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`. |
+
+### Verification record
+
+| Check | Result |
+|---|---|
+| Combined Foundational/active-generation matrix | 130 passed, 0 failed, including route/API allowlists, exact official inventories, truthful quantity/ratio states, persistence, UI rendering, server-derived tenant scope, and cross-tenant negatives. |
+| FND-02 focused rerun | 26 passed, 0 failed, 0 skipped. |
+| Typecheck / affected lint | Root typecheck and scoped ESLint passed. |
+| Secret scan / migration diff | Secret scan passed for 2,670 files; diff check passed; migration checks are unchanged/not applicable because no persistence artifact changed. |
+| Signed-in browser evidence | Pending externally; no available signed-in Sutra session was used and no live mutation was attempted. |
+| Standing PR CI | Exact-SHA resolution, application quality/build, collector/CloudFormation/PostgreSQL, scanner/vulnerability gate, and all six offline shards passed for the feature commit. |
+
+Maturity for FND-01, FND-02, and FND-03 remains
+`LOCAL_VERTICAL_CANDIDATE`. This checkpoint is not a main merge, deployment,
+provider reconciliation, or live-acceptance claim.
+
 ## Completed checkpoint — AWS onboarding evidence-storage publication repair
 
 | Field | Value |

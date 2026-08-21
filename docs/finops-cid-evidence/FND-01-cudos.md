@@ -63,7 +63,7 @@ layout parity.
 | G3 persistence | `IMPLEMENTED_UNVERIFIED` | Active billing generation repository, tenant/export/period/generation scope, immutable canonical rows, correction head. |
 | G4 API | `IMPLEMENTED_UNVERIFIED` | `GET /api/v1/finops/cudos`; exact query allowlist, authenticated live AWS connection, active-generation-only reads. |
 | G5 visual UI | `IMPLEMENTED_UNVERIFIED` | Exact 19-sheet/409-visual/142-control coverage navigator, executive monthly/weekly/daily trends, FOCUS category/service rankings, explorer, commitment, all official service-family projections, and the two v5.9.1 Bedrock token/cache visuals; missing source fields remain unavailable. The immutable official-source audit renders independently in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact version, commit, path, and SHA-256; the local constant is only the no-response fallback. |
-| G6 focused verification | `VERIFIED` | At feature commit `1844643967bcc9872fffa14db351427cc4bedfe5`, 50 CUDOS/route/definition/native SSR/shared Foundational assertions and 7 migration-registry assertions pass with no failures/skips; root typecheck, focused ESLint, secret scan, and diff check pass. |
+| G6 focused verification | `VERIFIED` | At feature commit `1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`, 53 CUDOS/route/definition/native SSR/shared Foundational assertions pass with no failures/skips; the combined three-dashboard and active-generation repository matrix passed 130 assertions. Root typecheck, focused ESLint, secret scan, diff check, and exact standing-PR CI also pass. |
 | G7 exact-tree gate | `NOT_STARTED` | Must be rerun on the eventual release SHA with PostgreSQL, Docker, rendered, and full repository gates. |
 | G8–G10 | `NOT_STARTED` | Controlled source reconciliation, reviewed release, immutable deployment, and live visual acceptance remain. |
 
@@ -98,8 +98,8 @@ node --test --test-concurrency=1 \
   tests/finops-foundational-sheets.test.ts
 ```
 
-Result at feature commit `1844643967bcc9872fffa14db351427cc4bedfe5`:
-**50 passed, 0 failed, 0 skipped**.
+Result at feature commit `1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`:
+**53 passed, 0 failed, 0 skipped**.
 
 Migration/no-drift command:
 
@@ -132,6 +132,25 @@ provider/live acceptance claim.
 - Reused the existing server-derived tenant boundary, active-generation
   persistence, API route, collector adapter, and least-privilege foundational
   export permissions. No AWS SDK operation or credential surface was added.
+
+## Adversarial closure — 2026-08-21
+
+Feature checkpoint: `1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`
+on `develop`; [standing PR #78 CI run 32493632168](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32493632168)
+passed for that exact SHA. Maturity remains `LOCAL_VERTICAL_CANDIDATE`.
+
+- Corrected the Bedrock ratio completeness boundary: if any compatible source
+  row lacks its usage quantity, the bucket now reports
+  `missing_usage_quantity` and withholds every derived read/write ratio. A
+  complete-looking ratio is never computed from only the surviving subset.
+- Corrected native source-format rendering so structured CUR format evidence is
+  presented as a bounded name and line count, not JavaScript object coercion.
+- Reused the existing collector, least-privilege IAM policy, canonical billing
+  rows, active-generation repository, server-derived tenant boundary, and API.
+  No AWS operation, credential field, persistence shape, or migration changed.
+- Provider telemetry/recommendations, inferred cache savings, complete
+  commitment context, exact QuickSight layout, controlled two-tenant/provider
+  reconciliation, and signed-in live acceptance remain outstanding.
 
 ## Merge record — 2026-08-06
 
