@@ -5,7 +5,44 @@ This ledger records implementation checkpoints for the AWS CMDB roadmap in
 catalog entry is not collector coverage, local verification is not live AWS
 acceptance, and absent or failed evidence is never reported as zero.
 
-## Active checkpoint — Milestone 0A catalog and AWS Navigator foundation
+## Active checkpoint — Milestone 1A VPC first-class subresources
+
+| Field | Value |
+|---|---|
+| Date | 2026-08-21 (Asia/Kolkata) |
+| Baseline commit | `e3224404de15c0447b215fe1c82297e24d45c677` |
+| Branch | `develop` only |
+| Vertical | Milestone 1A — first-class VPC route, association, ACL-entry, and gateway-attachment projection from already-authorized EC2 reads |
+| Measurable outcome | Promoted five captured VPC object types from catalog-only to implemented normalized resources, scoped counts/search/Resource 360, and field-backed topology without adding an AWS SDK operation or permission. |
+| Files / shared integration points | Repaired the existing inventory normalizers and signed snapshot relationship projector; extended canonical bindings and pure CMDB relationships; reused generic persistence, tenant-scoped APIs, Navigator UI, search, and Resource 360 unchanged. See the closure worksheet for the exact frozen/edit sets. |
+| Resource types | `aws.ec2.route`, `aws.ec2.route-table-association`, `aws.ec2.network-acl-entry`, `aws.ec2.network-acl-association`, `aws.ec2.internet-gateway-attachment` |
+| AWS operations | Reused only `ec2:DescribeRouteTables`, `ec2:DescribeNetworkAcls`, and `ec2:DescribeInternetGateways`; all remain bounded, paginated, retry/deadline-aware collector calls. |
+| IAM | No policy change. The exact three operations already exist in the immutable role deny ceiling and allowlist. Reserved `.8.19` remains untouched for FOCUS. |
+| Normalization / persistence | Provider association IDs are retained. Provider objects without IDs use transparent stable owner/key composites and no invented ARN. Existing immutable generic snapshot persistence stores the five types atomically; no schema or migration is required. |
+| Tenant isolation | Reuses signed collector account/partition/Region context, server-derived organization/customer/connection lookup, and the Navigator connection/customer/account state assertion. New-type search and count tests include Region exclusion and wrong-tenant/account rejection. |
+| Truthful state | Each child shares the exact owning collector coverage row. Missing IDs are skipped; permission denial, incomplete pagination/Region coverage, failure, no snapshot, retention, and staleness suppress authoritative counts. |
+| Relationships | Routes link to their route table and evidenced target; route-table and ACL associations link to their owner and subnet/gateway; ACL entries link to their ACL; internet-gateway attachments link to their gateway and VPC only through stored fields. |
+| Migrations | Not applicable; no database or migration-registry file changes. |
+| External acceptance | `PENDING_EXTERNAL_ACCEPTANCE` — no disposable multi-Region/two-tenant AWS account evidence and no signed-in Sutra Chrome session are available. |
+| Known limitations / next slice | NAT/transit gateways, endpoints, peering, VPN, Direct Connect, and propagation require new exact IAM operations. A valid standard successor cannot be created until reserved FOCUS `.8.19` is integrated; this slice does not steal or skip that reservation. |
+| Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); checkpoint SHA and exact workflows pending save. |
+
+### Verification record
+
+| Check | Result |
+|---|---|
+| Collector inventory / signed snapshot | 21 inventory plus 14 local-server tests passed, 0 failed, including shared pagination, exact normalized children/counts, API provenance, persisted child edges, failure isolation, deadlines, and repeated-token handling |
+| Catalog/Navigator/relationships | 24 passed, 0 failed, including exact five bindings, API/UI contracts, current-count boundary, Region exclusion, wrong-tenant/account rejection, deterministic topology, and unresolved-target honesty |
+| Typecheck | Root and collector passed |
+| Permission/CloudFormation | 12 permission/template tests passed; CloudFormation lint passed 28 templates with 42 documented Bedrock catalog false positives suppressed; no command or template changed |
+| Migration diff | Passed / not applicable; no database schema, migration, migrator, or registry file changed |
+| Lint / secret scan / build / rendered routes | Affected and full ESLint passed; secret scan passed for 2,666 files; production build passed; rendered routes passed 4/4 |
+| Signed-in browser evidence | Pending externally; the available Chrome session has no Sutra application tab |
+
+The bounded reuse and contract decisions are recorded in
+`docs/CLOUDAWARE_AWS_VPC_SUBRESOURCE_CLOSURE.md`.
+
+## Completed checkpoint — Milestone 0A catalog and AWS Navigator foundation
 
 | Field | Value |
 |---|---|
@@ -23,7 +60,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 | UI integration | Added `/cmdb/navigator`, category/service/type destinations, breadcrumbs, Region and connection scope, server-scoped catalog/resource search, Resource 360 links, and bounded per-connection recent/pinned catalog destinations. |
 | External acceptance | `PENDING_EXTERNAL_ACCEPTANCE` — the available Chrome session has no signed-in Sutra application tab, and no disposable multi-account/multi-partition AWS fixture is available. Local route, rendered-page, build, and security evidence do not replace those checks. |
 | Known limitations | Broader application-wide search and organization-scale account navigation remain a separate Milestone 0 vertical; catalog rows do not claim unimplemented VPC or other adapters. |
-| Next slice | After this checkpoint and its exact standing-PR CI pass: organization-scale Navigator/search scope, then the complete VPC networking vertical. |
+| Next slice | After this checkpoint and its exact standing-PR CI pass: the complete VPC networking vertical, beginning with first-class subresources from already-authorized EC2 reads. |
 | Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); [exact CI run 32457823809](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32457823809) and [Kubernetes/supply-chain run 32457823732](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32457823732) passed for `e8c87e25d4a6c9c287540103bb0ac1a60aed9956`. |
 
 ### Verification record

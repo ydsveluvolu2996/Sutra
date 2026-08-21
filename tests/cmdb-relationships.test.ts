@@ -73,7 +73,35 @@ function fleet(): PilotResource[] {
         { destination: "10.0.0.0/8", target: "nat-9" },
       ],
     }),
+    res("ec2", "aws.ec2.route-table-association", "rtbassoc-1", {
+      routeTableId: "rtb-1",
+      vpcId: "vpc-1",
+      subnetId: "subnet-1",
+    }),
+    res("ec2", "aws.ec2.route", "rtb-1/route/0.0.0.0%2F0", {
+      routeTableId: "rtb-1",
+      vpcId: "vpc-1",
+      target: "igw-1",
+    }),
+    res("ec2", "aws.ec2.network-acl", "acl-1", {
+      vpcId: "vpc-1",
+      associatedSubnetIds: ["subnet-1"],
+    }),
+    res("ec2", "aws.ec2.network-acl-association", "aclassoc-1", {
+      networkAclId: "acl-1",
+      vpcId: "vpc-1",
+      subnetId: "subnet-1",
+    }),
+    res("ec2", "aws.ec2.network-acl-entry", "acl-1/entry/ingress/100", {
+      networkAclId: "acl-1",
+      vpcId: "vpc-1",
+      ruleNumber: 100,
+    }),
     res("ec2", "aws.ec2.internet-gateway", "igw-1", { attachedVpcIds: ["vpc-1"], attached: true }),
+    res("ec2", "aws.ec2.internet-gateway-attachment", "igw-1/attachment/vpc-1", {
+      internetGatewayId: "igw-1",
+      vpcId: "vpc-1",
+    }),
     res("s3", "aws.s3.bucket", "my-bucket", { versioning: "Enabled" }),
   ];
 }
@@ -114,6 +142,13 @@ describe("deriveRelationships", () => {
     assert.ok(hasEdge(edges, ["ec2", "aws.ec2.route-table", "rtb-1"], key("ec2", "aws.ec2.subnet", "subnet-1"), "associates-subnet", "associatedSubnetIds"));
     assert.ok(hasEdge(edges, ["ec2", "aws.ec2.route-table", "rtb-1"], key("ec2", "aws.ec2.internet-gateway", "igw-1"), "routes-through-gateway", "routes.target"));
     assert.ok(hasEdge(edges, ["ec2", "aws.ec2.internet-gateway", "igw-1"], key("ec2", "aws.ec2.vpc", "vpc-1"), "attached-to-vpc", "attachedVpcIds"));
+    // First-class VPC subresources keep their own identities and exact edge provenance.
+    assert.ok(hasEdge(edges, ["ec2", "aws.ec2.route", "rtb-1/route/0.0.0.0%2F0"], key("ec2", "aws.ec2.route-table", "rtb-1"), "contained-in-route-table", "routeTableId"));
+    assert.ok(hasEdge(edges, ["ec2", "aws.ec2.route", "rtb-1/route/0.0.0.0%2F0"], key("ec2", "aws.ec2.internet-gateway", "igw-1"), "routes-through-gateway", "target"));
+    assert.ok(hasEdge(edges, ["ec2", "aws.ec2.route-table-association", "rtbassoc-1"], key("ec2", "aws.ec2.subnet", "subnet-1"), "associates-subnet", "subnetId"));
+    assert.ok(hasEdge(edges, ["ec2", "aws.ec2.network-acl-entry", "acl-1/entry/ingress/100"], key("ec2", "aws.ec2.network-acl", "acl-1"), "contained-in-network-acl", "networkAclId"));
+    assert.ok(hasEdge(edges, ["ec2", "aws.ec2.network-acl-association", "aclassoc-1"], key("ec2", "aws.ec2.subnet", "subnet-1"), "associates-subnet", "subnetId"));
+    assert.ok(hasEdge(edges, ["ec2", "aws.ec2.internet-gateway-attachment", "igw-1/attachment/vpc-1"], key("ec2", "aws.ec2.internet-gateway", "igw-1"), "contained-in-internet-gateway", "internetGatewayId"));
   });
 
   it("never emits a self-loop and produces no edges for a resource with no relationship fields", () => {

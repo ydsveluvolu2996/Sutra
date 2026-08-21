@@ -62,10 +62,33 @@ test("all catalog rows have one category/service route and explicit independent 
 
 test("existing normalized CMDB types are explicitly bound and Cloud WAN tag-only types remain visible", () => {
   const implemented = AWS_CMDB_CATALOG.resourceTypes.filter((type) => type.maturity.implemented);
-  assert.equal(implemented.length, 27);
-  assert.equal(new Set(implemented.map((type) => type.normalizedResourceType)).size, 27);
+  assert.equal(implemented.length, 32);
+  assert.equal(new Set(implemented.map((type) => type.normalizedResourceType)).size, 32);
   assert.ok(implemented.every((type) => type.collectorKey !== null && type.requiredOperations.length > 0));
   assert.equal(findAwsCatalogResourceTypeByNormalizedType("aws.ec2.vpc")?.name, "AWS VPC");
+  assert.deepEqual(
+    [
+      "aws.ec2.route",
+      "aws.ec2.route-table-association",
+      "aws.ec2.network-acl-entry",
+      "aws.ec2.network-acl-association",
+      "aws.ec2.internet-gateway-attachment",
+    ].map((resourceType) => ({
+      resourceType,
+      catalog: findAwsCatalogResourceTypeByNormalizedType(resourceType),
+    })).map(({ resourceType, catalog }) => ({
+      resourceType,
+      collectorKey: catalog?.collectorKey,
+      operations: catalog?.requiredOperations,
+    })),
+    [
+      { resourceType: "aws.ec2.route", collectorKey: "ec2.route-tables", operations: ["ec2:DescribeRouteTables"] },
+      { resourceType: "aws.ec2.route-table-association", collectorKey: "ec2.route-tables", operations: ["ec2:DescribeRouteTables"] },
+      { resourceType: "aws.ec2.network-acl-entry", collectorKey: "ec2.network-acls", operations: ["ec2:DescribeNetworkAcls"] },
+      { resourceType: "aws.ec2.network-acl-association", collectorKey: "ec2.network-acls", operations: ["ec2:DescribeNetworkAcls"] },
+      { resourceType: "aws.ec2.internet-gateway-attachment", collectorKey: "ec2.internet-gateways", operations: ["ec2:DescribeInternetGateways"] },
+    ],
+  );
   assert.equal(findAwsCatalogResourceTypeByNormalizedType("aws.ssm.patch-state")?.origin, "sutra_extension");
 
   const cloudWan = findAwsCatalogService("aws-cloud-wan");

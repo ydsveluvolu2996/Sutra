@@ -240,14 +240,44 @@ const IMPLEMENTED_BINDINGS: Readonly<Record<string, ImplementedBinding>> = Objec
     scope: "regional",
     requiredOperations: ["ec2:DescribeInternetGateways"],
   },
+  "AWS VPC Internet Gateway Attachment": {
+    normalizedResourceType: "aws.ec2.internet-gateway-attachment",
+    collectorKey: "ec2.internet-gateways",
+    scope: "regional",
+    requiredOperations: ["ec2:DescribeInternetGateways"],
+  },
   "AWS VPC Network ACL": {
     normalizedResourceType: "aws.ec2.network-acl",
     collectorKey: "ec2.network-acls",
     scope: "regional",
     requiredOperations: ["ec2:DescribeNetworkAcls"],
   },
+  "AWS VPC Network ACL Association": {
+    normalizedResourceType: "aws.ec2.network-acl-association",
+    collectorKey: "ec2.network-acls",
+    scope: "regional",
+    requiredOperations: ["ec2:DescribeNetworkAcls"],
+  },
+  "AWS VPC Network ACL Entry": {
+    normalizedResourceType: "aws.ec2.network-acl-entry",
+    collectorKey: "ec2.network-acls",
+    scope: "regional",
+    requiredOperations: ["ec2:DescribeNetworkAcls"],
+  },
+  "AWS VPC Route": {
+    normalizedResourceType: "aws.ec2.route",
+    collectorKey: "ec2.route-tables",
+    scope: "regional",
+    requiredOperations: ["ec2:DescribeRouteTables"],
+  },
   "AWS VPC Route Table": {
     normalizedResourceType: "aws.ec2.route-table",
+    collectorKey: "ec2.route-tables",
+    scope: "regional",
+    requiredOperations: ["ec2:DescribeRouteTables"],
+  },
+  "AWS VPC Route Table Association": {
+    normalizedResourceType: "aws.ec2.route-table-association",
     collectorKey: "ec2.route-tables",
     scope: "regional",
     requiredOperations: ["ec2:DescribeRouteTables"],
@@ -381,7 +411,7 @@ const typeByScopedId = new Map(resourceTypes.map((type) => [`${type.serviceId}/$
 const typeByNormalizedResourceType = new Map(resourceTypes.flatMap((type) =>
   type.normalizedResourceType === null ? [] : [[type.normalizedResourceType, type] as const]));
 
-if (services.length !== 114 || resourceTypes.length !== 987 || typeByNormalizedResourceType.size !== 27) {
+if (services.length !== 114 || resourceTypes.length !== 987 || typeByNormalizedResourceType.size !== 32) {
   throw new Error("The canonical AWS CMDB catalog failed its integration contract");
 }
 

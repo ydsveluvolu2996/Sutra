@@ -85,10 +85,15 @@ function state(overrides: Partial<PilotState> = {}): PilotState {
 test("type counts become numeric only for a complete exact collector/Region boundary", () => {
   const vpc = findAwsCatalogResourceTypeByNormalizedType("aws.ec2.vpc");
   const subnet = findAwsCatalogResourceTypeByNormalizedType("aws.ec2.subnet");
-  assert.ok(vpc && subnet);
+  const route = findAwsCatalogResourceTypeByNormalizedType("aws.ec2.route");
+  assert.ok(vpc && subnet && route);
   const current = state({
-    resources: [resource("aws.ec2.vpc", "vpc-current"), resource("aws.ec2.vpc", "vpc-retained", "retirement_pending")],
-    coverage: [coverage("ec2.vpcs"), coverage("ec2.subnets")],
+    resources: [
+      resource("aws.ec2.vpc", "vpc-current"),
+      resource("aws.ec2.vpc", "vpc-retained", "retirement_pending"),
+      resource("aws.ec2.route", "rtb-a/route/0.0.0.0%2F0"),
+    ],
+    coverage: [coverage("ec2.vpcs"), coverage("ec2.subnets"), coverage("ec2.route-tables")],
   });
   assert.deepEqual(coverageForAwsCatalogType(current, vpc, "us-east-1", NOW), {
     state: "complete",
@@ -100,6 +105,9 @@ test("type counts become numeric only for a complete exact collector/Region boun
   const zero = coverageForAwsCatalogType(current, subnet, "us-east-1", NOW);
   assert.equal(zero.state, "complete");
   assert.equal(zero.authoritativeCount, 0);
+  const routeCoverage = coverageForAwsCatalogType(current, route, "us-east-1", NOW);
+  assert.equal(routeCoverage.state, "complete");
+  assert.equal(routeCoverage.authoritativeCount, 1);
 
   const west = coverageForAwsCatalogType(current, vpc, "us-west-2", NOW);
   assert.equal(west.state, "not_collected");
@@ -153,8 +161,8 @@ test("catalog-only, permission-denied, retained, and stale states never become t
 
 test("Navigator routes all catalog services, scopes search by Region, and rejects wrong-tenant state substitution", () => {
   const current = state({
-    resources: [resource("aws.ec2.vpc", "only-west-secret", "active", "us-west-2")],
-    coverage: [coverage("ec2.vpcs"), { ...coverage("ec2.vpcs"), region: "us-west-2" }],
+    resources: [resource("aws.ec2.route", "only-west-route-secret", "active", "us-west-2")],
+    coverage: [coverage("ec2.route-tables"), { ...coverage("ec2.route-tables"), region: "us-west-2" }],
   });
   const root = buildAwsNavigatorEnvelope({ state: current, nowMs: NOW });
   assert.equal(root.categories.length, 18);
@@ -162,7 +170,7 @@ test("Navigator routes all catalog services, scopes search by Region, and reject
   assert.equal(root.catalog.referenceTypeCount, 986);
   assert.equal(root.scope.connectionId, CONNECTION_ID);
 
-  const service = buildAwsNavigatorEnvelope({ state: current, segments: ["aws-vpc"], region: "us-east-1", query: "only-west-secret", nowMs: NOW });
+  const service = buildAwsNavigatorEnvelope({ state: current, segments: ["aws-vpc"], region: "us-east-1", query: "only-west-route-secret", nowMs: NOW });
   assert.equal(service.destination.kind, "service");
   assert.equal(service.resourceTypes.length, findAwsCatalogService("aws-vpc")?.resourceTypes.length);
   assert.equal(service.searchResults.some((result) => result.kind === "resource"), false);

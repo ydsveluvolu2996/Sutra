@@ -46,11 +46,24 @@ fail when either the source files or the generated artifact drift.
 
 ## Existing collector integration
 
-Twenty-seven normalized CMDB resource types are explicitly bound to catalog
-records, collector coverage keys, scope, and exact read operations. Twenty-six
+Thirty-two normalized CMDB resource types are explicitly bound to catalog
+records, collector coverage keys, scope, and exact read operations. Thirty-one
 are reference-catalog records and one is the Sutra SSM patch-state extension.
 Bindings are reviewable in `lib/aws-cmdb-catalog.ts`; name similarity never
 promotes a type automatically.
+
+The first bounded VPC-depth slice projects five first-class subresources from
+already-authorized EC2 metadata pages:
+
+- VPC routes and route-table associations from `ec2:DescribeRouteTables`;
+- network ACL entries and associations from `ec2:DescribeNetworkAcls`;
+- internet-gateway attachments from `ec2:DescribeInternetGateways`.
+
+Objects with provider IDs retain them. Route and attachment objects that AWS
+does not assign an ID use an explicit stable owner/key composite and no invented
+ARN. The owning collector's pagination, deadline, retry, permission, and Region
+coverage applies to every projected child. No new AWS operation or permission
+template is involved.
 
 The Navigator does not call AWS. It reads only the existing durable CMDB
 projection and coverage evidence. AWS SDK clients and temporary credentials
@@ -138,4 +151,8 @@ unchanged.
 - Catalog rows whose adapter contract is not assessed intentionally have
   unknown scope, partition, permission, pagination, and freshness metadata.
 - Missing VPC networking adapters remain planned for the next deep vertical;
-  catalog rows do not imply their collection.
+  catalog rows do not imply their collection. In particular, NAT/transit
+  gateways, endpoints, peering, VPN, Direct Connect, and route propagation still
+  require bounded adapters and valid permission successors. `AWS VPC Static
+  Route` remains distinct and unimplemented until its product contract is
+  defined rather than guessed from the general route record.

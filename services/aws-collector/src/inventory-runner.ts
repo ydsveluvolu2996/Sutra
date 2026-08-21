@@ -63,6 +63,7 @@ import {
   type DescribeVpcsCommandInput,
   type DescribeVpcsCommandOutput,
   type IpPermission,
+  type Route,
 } from "@aws-sdk/client-ec2";
 import {
   DescribeListenersCommand,
@@ -1709,6 +1710,45 @@ async function collectNetworkInterfaces(
   throw new InventoryProtocolError("EC2 DescribeNetworkInterfaces exceeded pagination limit");
 }
 
+interface RouteEndpoint {
+  readonly value: string;
+  readonly type: string;
+}
+
+function routeDestination(route: Route): RouteEndpoint | null {
+  if (route.DestinationCidrBlock !== undefined) {
+    return { value: route.DestinationCidrBlock, type: "ipv4_cidr" };
+  }
+  if (route.DestinationIpv6CidrBlock !== undefined) {
+    return { value: route.DestinationIpv6CidrBlock, type: "ipv6_cidr" };
+  }
+  if (route.DestinationPrefixListId !== undefined) {
+    return { value: route.DestinationPrefixListId, type: "prefix_list" };
+  }
+  return null;
+}
+
+function routeTarget(route: Route): RouteEndpoint | null {
+  const candidates: readonly (readonly [string | undefined, string])[] = [
+    [route.EgressOnlyInternetGatewayId, "egress_only_internet_gateway"],
+    [route.GatewayId, "gateway"],
+    [route.InstanceId, "instance"],
+    [route.NatGatewayId, "nat_gateway"],
+    [route.TransitGatewayId, "transit_gateway"],
+    [route.LocalGatewayId, "local_gateway"],
+    [route.CarrierGatewayId, "carrier_gateway"],
+    [route.NetworkInterfaceId, "network_interface"],
+    [route.VpcPeeringConnectionId, "vpc_peering_connection"],
+    [route.CoreNetworkArn, "core_network"],
+    [route.OdbNetworkArn, "odb_network"],
+    [route.IpAddress, "ip_address"],
+  ];
+  for (const [value, type] of candidates) {
+    if (value !== undefined) return { value, type };
+  }
+  return null;
+}
+
 async function collectRouteTables(
   context: InventoryCollectionContext,
   region: string,
@@ -1731,7 +1771,7 @@ async function collectRouteTables(
       // fact aws-network-exposure consumes; we record it, never infer beyond it.
       const routesToIgw = routes.some((route) => (route.GatewayId ?? "").startsWith("igw-"));
       const routesToNat = routes.some((route) => route.NatGatewayId !== undefined);
-      return [resourceFromApi(
+      const parent = resourceFromApi(
         context,
         observedAt,
         region,
@@ -1751,14 +1791,66 @@ async function collectRouteTables(
           // Raw route entries (destination -> target) so downstream reachability
           // analysis can confirm an exact internet-gateway hop, not just a flag.
           routes: routes.map((route) => compact({
-            destination: route.DestinationCidrBlock ?? route.DestinationIpv6CidrBlock ?? route.DestinationPrefixListId,
-            target: route.GatewayId ?? route.NatGatewayId ?? route.TransitGatewayId ?? route.VpcPeeringConnectionId ?? route.NetworkInterfaceId,
+            destination: routeDestination(route)?.value,
+            destinationType: routeDestination(route)?.type,
+            target: routeTarget(route)?.value,
+            targetType: routeTarget(route)?.type,
             state: route.State,
+            origin: route.Origin,
           })),
           propagatingVgws: strings((routeTable.PropagatingVgws ?? []).map((vgw) => vgw.GatewayId)),
         }),
         routeTable.Tags,
-      )];
+      );
+      const associationResources = associations.flatMap((association) =>
+        association.RouteTableAssociationId === undefined
+          ? []
+          : [resourceFromApi(
+              context,
+              observedAt,
+              region,
+              "ec2",
+              "aws.ec2.route-table-association",
+              association.RouteTableAssociationId,
+              undefined,
+              "ec2:DescribeRouteTables",
+              compact({
+                routeTableId: routeTable.RouteTableId,
+                vpcId: routeTable.VpcId,
+                subnetId: association.SubnetId,
+                gatewayId: association.GatewayId,
+                publicIpv4Pool: association.PublicIpv4Pool,
+                main: association.Main,
+                state: association.AssociationState?.State,
+              }),
+            )],
+      );
+      const routeResources = routes.flatMap((route) => {
+        const destination = routeDestination(route);
+        if (destination === null) return [];
+        const target = routeTarget(route);
+        return [resourceFromApi(
+          context,
+          observedAt,
+          region,
+          "ec2",
+          "aws.ec2.route",
+          `${routeTable.RouteTableId}/route/${encodeURIComponent(destination.value)}`,
+          undefined,
+          "ec2:DescribeRouteTables",
+          compact({
+            routeTableId: routeTable.RouteTableId,
+            vpcId: routeTable.VpcId,
+            destination: destination.value,
+            destinationType: destination.type,
+            target: target?.value,
+            targetType: target?.type,
+            state: route.State,
+            origin: route.Origin,
+          }),
+        )];
+      });
+      return [parent, ...associationResources, ...routeResources];
     });
     await state.emit({ resources, evidence: [] });
     state.observePage(resources.length);
@@ -1784,7 +1876,7 @@ async function collectInternetGateways(
     const resources = (output.InternetGateways ?? []).flatMap((gateway) => {
       if (gateway.InternetGatewayId === undefined) return [];
       const attachments = gateway.Attachments ?? [];
-      return [resourceFromApi(
+      const parent = resourceFromApi(
         context,
         observedAt,
         region,
@@ -1799,7 +1891,27 @@ async function collectInternetGateways(
           attached: attachments.length > 0,
         }),
         gateway.Tags,
-      )];
+      );
+      const attachmentResources = attachments.flatMap((attachment) =>
+        attachment.VpcId === undefined
+          ? []
+          : [resourceFromApi(
+              context,
+              observedAt,
+              region,
+              "ec2",
+              "aws.ec2.internet-gateway-attachment",
+              `${gateway.InternetGatewayId}/attachment/${attachment.VpcId}`,
+              undefined,
+              "ec2:DescribeInternetGateways",
+              compact({
+                internetGatewayId: gateway.InternetGatewayId,
+                vpcId: attachment.VpcId,
+                state: attachment.State,
+              }),
+            )],
+      );
+      return [parent, ...attachmentResources];
     });
     await state.emit({ resources, evidence: [] });
     state.observePage(resources.length);
@@ -1889,7 +2001,7 @@ async function collectNetworkAcls(
       if (acl.NetworkAclId === undefined) return [];
       const associations = acl.Associations ?? [];
       const entries = acl.Entries ?? [];
-      return [resourceFromApi(
+      const parent = resourceFromApi(
         context,
         observedAt,
         region,
@@ -1916,7 +2028,54 @@ async function collectNetworkAcls(
           })),
         }),
         acl.Tags,
-      )];
+      );
+      const associationResources = associations.flatMap((association) =>
+        association.NetworkAclAssociationId === undefined
+          ? []
+          : [resourceFromApi(
+              context,
+              observedAt,
+              region,
+              "ec2",
+              "aws.ec2.network-acl-association",
+              association.NetworkAclAssociationId,
+              undefined,
+              "ec2:DescribeNetworkAcls",
+              compact({
+                networkAclId: acl.NetworkAclId,
+                vpcId: acl.VpcId,
+                subnetId: association.SubnetId,
+              }),
+            )],
+      );
+      const entryResources = entries.flatMap((entry) =>
+        entry.RuleNumber === undefined || entry.Egress === undefined
+          ? []
+          : [resourceFromApi(
+              context,
+              observedAt,
+              region,
+              "ec2",
+              "aws.ec2.network-acl-entry",
+              `${acl.NetworkAclId}/entry/${entry.Egress ? "egress" : "ingress"}/${entry.RuleNumber}`,
+              undefined,
+              "ec2:DescribeNetworkAcls",
+              compact({
+                networkAclId: acl.NetworkAclId,
+                vpcId: acl.VpcId,
+                ruleNumber: entry.RuleNumber,
+                egress: entry.Egress,
+                protocol: entry.Protocol,
+                ruleAction: entry.RuleAction,
+                cidr: entry.CidrBlock ?? entry.Ipv6CidrBlock,
+                fromPort: entry.PortRange?.From,
+                toPort: entry.PortRange?.To,
+                icmpType: entry.IcmpTypeCode?.Type,
+                icmpCode: entry.IcmpTypeCode?.Code,
+              }),
+            )],
+      );
+      return [parent, ...associationResources, ...entryResources];
     });
     await state.emit({ resources, evidence: [] });
     state.observePage(resources.length);
