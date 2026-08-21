@@ -19,6 +19,7 @@ import {
   type FinopsAllocationMode,
   type FinopsCostBasis,
   type FinopsCostDimension,
+  type FinopsExplorerFilter,
 } from "../../../../../lib/finops-cost-intelligence";
 import { FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION } from
   "../../../../../lib/finops-cost-intelligence-official-definition";
@@ -33,6 +34,9 @@ const CONNECTION_ID = /^conn_[a-f0-9]{32}$/u;
 const PERIOD = /^\d{4}-(?:0[1-9]|1[0-2])$/u;
 const MAX_PERIODS = 36;
 const MAX_TOTAL_ROWS = 250_000;
+const MAX_EXPLORER_FILTERS = 8;
+const MAX_EXPLORER_LIMIT = 200;
+const MAX_FILTER_VALUE_LENGTH = 256;
 const ALLOCATION_MODES = new Set<FinopsAllocationMode>([
   "showback",
   "chargeback",
@@ -46,7 +50,11 @@ const ALLOWED_QUERY_PARAMETERS = new Set([
   "moverDimension",
   "pivotRow",
   "pivotColumn",
+  "explorerPeriod",
+  "explorerLimit",
+  "explorerFilter",
 ]);
+const MULTI_VALUE_QUERY_PARAMETERS = new Set(["explorerFilter"]);
 
 interface CostIntelligenceQuery {
   readonly connectionId: string;
@@ -56,6 +64,9 @@ interface CostIntelligenceQuery {
   readonly allocationMode: FinopsAllocationMode;
   readonly moverDimension: FinopsCostDimension;
   readonly pivotDimensions: readonly [FinopsCostDimension, FinopsCostDimension];
+  readonly explorerPeriod: string | null;
+  readonly explorerLimit: number;
+  readonly explorerFilters: readonly FinopsExplorerFilter[];
 }
 
 function invalidRequest(): never {
@@ -65,13 +76,30 @@ function invalidRequest(): never {
   );
 }
 
+function parseExplorerFilter(encoded: string): FinopsExplorerFilter {
+  const separator = encoded.indexOf(":");
+  const dimension = encoded.slice(0, separator);
+  const value = encoded.slice(separator + 1);
+  if (
+    separator < 1
+    || !FINOPS_COST_DIMENSIONS.includes(dimension as FinopsCostDimension)
+    || value.length < 1
+    || value.length > MAX_FILTER_VALUE_LENGTH
+    || value.includes("\0")
+  ) invalidRequest();
+  return { dimension: dimension as FinopsCostDimension, value };
+}
+
 function parseQuery(request: Request): CostIntelligenceQuery {
   const parameters = new URL(request.url).searchParams;
   for (const key of parameters.keys()) {
     if (!ALLOWED_QUERY_PARAMETERS.has(key)) invalidRequest();
   }
   for (const key of ALLOWED_QUERY_PARAMETERS) {
-    if (parameters.getAll(key).length > 1) invalidRequest();
+    if (
+      !MULTI_VALUE_QUERY_PARAMETERS.has(key)
+      && parameters.getAll(key).length > 1
+    ) invalidRequest();
   }
 
   const connectionId = parameters.get("connectionId") ?? "";
@@ -84,6 +112,9 @@ function parseQuery(request: Request): CostIntelligenceQuery {
     parameters.get("moverDimension") ?? "service";
   const requestedPivotRow = parameters.get("pivotRow") ?? "account";
   const requestedPivotColumn = parameters.get("pivotColumn") ?? "service";
+  const explorerPeriod = parameters.get("explorerPeriod");
+  const requestedExplorerLimit = parameters.get("explorerLimit") ?? "50";
+  const encodedExplorerFilters = parameters.getAll("explorerFilter");
   if (
     !CONNECTION_ID.test(connectionId)
     || (baselinePeriod !== null && !PERIOD.test(baselinePeriod))
@@ -102,6 +133,10 @@ function parseQuery(request: Request): CostIntelligenceQuery {
       requestedPivotColumn as FinopsCostDimension,
     )
     || requestedPivotRow === requestedPivotColumn
+    || (explorerPeriod !== null && !PERIOD.test(explorerPeriod))
+    || !/^[1-9]\d{0,2}$/u.test(requestedExplorerLimit)
+    || Number(requestedExplorerLimit) > MAX_EXPLORER_LIMIT
+    || encodedExplorerFilters.length > MAX_EXPLORER_FILTERS
     || (
       baselinePeriod !== null
       && comparisonPeriod !== null
@@ -120,6 +155,9 @@ function parseQuery(request: Request): CostIntelligenceQuery {
       requestedPivotRow as FinopsCostDimension,
       requestedPivotColumn as FinopsCostDimension,
     ],
+    explorerPeriod,
+    explorerLimit: Number(requestedExplorerLimit),
+    explorerFilters: encodedExplorerFilters.map(parseExplorerFilter),
   };
 }
 
@@ -338,9 +376,10 @@ export async function GET(request: Request): Promise<Response> {
       moverDimension: query.moverDimension,
       pivotDimensions: query.pivotDimensions,
       explorer: {
-        period: selected.comparisonPeriod,
+        period: query.explorerPeriod ?? selected.comparisonPeriod,
         dimensions: query.pivotDimensions,
-        limit: 50,
+        filters: query.explorerFilters,
+        limit: query.explorerLimit,
         maximumCardinality: 1_000,
       },
       forecast: { minimumPeriods: 3, trainingPeriods: 6 },

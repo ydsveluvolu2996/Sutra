@@ -9,15 +9,23 @@ const route = await readFile(
   ),
   "utf8",
 );
+const endpoint = await readFile(
+  new URL(
+    "../app/costs/finops-foundational-endpoint.ts",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 test("Cost Intelligence rejects duplicate, unknown, and invalid query inputs with exact defaults", () => {
   assert.match(route, /export const dynamic = "force-dynamic"/u);
   assert.match(
     route,
-    /const ALLOWED_QUERY_PARAMETERS = new Set\(\[\s*"connectionId",\s*"baselinePeriod",\s*"comparisonPeriod",\s*"costBasis",\s*"allocationMode",\s*"moverDimension",\s*"pivotRow",\s*"pivotColumn",\s*\]\)/u,
+    /const ALLOWED_QUERY_PARAMETERS = new Set\(\[\s*"connectionId",\s*"baselinePeriod",\s*"comparisonPeriod",\s*"costBasis",\s*"allocationMode",\s*"moverDimension",\s*"pivotRow",\s*"pivotColumn",\s*"explorerPeriod",\s*"explorerLimit",\s*"explorerFilter",\s*\]\)/u,
   );
   assert.match(route, /parameters\.keys\(\)/u);
   assert.match(route, /!ALLOWED_QUERY_PARAMETERS\.has\(key\)/u);
+  assert.match(route, /!MULTI_VALUE_QUERY_PARAMETERS\.has\(key\)/u);
   assert.match(route, /parameters\.getAll\(key\)\.length > 1/u);
   assert.match(route, /parameters\.get\("costBasis"\) \?\? "billed"/u);
   assert.match(route, /parameters\.get\("allocationMode"\) \?\? "showback"/u);
@@ -31,6 +39,12 @@ test("Cost Intelligence rejects duplicate, unknown, and invalid query inputs wit
     route,
     /baselinePeriod === comparisonPeriod/u,
   );
+  assert.match(route, /const MAX_EXPLORER_FILTERS = 8/u);
+  assert.match(route, /const MAX_EXPLORER_LIMIT = 200/u);
+  assert.match(route, /encodedExplorerFilters\.length > MAX_EXPLORER_FILTERS/u);
+  assert.match(route, /encoded\.indexOf\(":"\)/u);
+  assert.match(route, /FINOPS_COST_DIMENSIONS\.includes\(dimension/u);
+  assert.match(route, /value\.length > MAX_FILTER_VALUE_LENGTH/u);
 });
 
 test("tenant scope is derived only from the authenticated live AWS connection", () => {
@@ -124,7 +138,7 @@ test("the report receives exact active datasets, bounded options, and conservati
   assert.match(route, /pivotDimensions: query\.pivotDimensions/u);
   assert.match(
     route,
-    /explorer:\s*\{\s*period: selected\.comparisonPeriod,\s*dimensions: query\.pivotDimensions,\s*limit: 50,\s*maximumCardinality: 1_000,\s*\}/u,
+    /explorer:\s*\{\s*period: query\.explorerPeriod \?\? selected\.comparisonPeriod,\s*dimensions: query\.pivotDimensions,\s*filters: query\.explorerFilters,\s*limit: query\.explorerLimit,\s*maximumCardinality: 1_000,\s*\}/u,
   );
   assert.match(
     route,
@@ -180,4 +194,15 @@ test("every Cost Intelligence state returns the immutable official definition", 
     route,
     /sourceState: "complete",[\s\S]*officialDefinition: FINOPS_COST_INTELLIGENCE_OFFICIAL_DEFINITION/u,
   );
+});
+
+test("the native dashboard sends only bounded Cost Intelligence controls", () => {
+  assert.match(endpoint, /DEFAULT_COST_INTELLIGENCE_FILTERS/u);
+  assert.match(endpoint, /explorerLimit: String\(filters\.explorerLimit\)/u);
+  assert.match(endpoint, /filters\.explorerFilters\.slice\(0, 8\)/u);
+  assert.match(
+    endpoint,
+    /query\.append\("explorerFilter", `\$\{filter\.dimension\}:\$\{filter\.value\}`\)/u,
+  );
+  assert.doesNotMatch(endpoint, /organizationId|customerId|tenantId/u);
 });

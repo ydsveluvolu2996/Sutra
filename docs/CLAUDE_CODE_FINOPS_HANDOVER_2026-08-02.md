@@ -19,6 +19,31 @@ It is deliberately conservative: a dashboard is not promoted merely because isol
 
 The WIP snapshot contains every uncommitted file that existed when work stopped: 185 files, 10,958 insertions and 432 deletions. It was pushed intentionally as one WIP safety commit so no agent output is only local.
 
+## Mac Mini continuation update — 2026-08-21
+
+The historical handoff point above remains provenance. Current work now follows
+the repository's single-branch policy on `develop`, through standing PR #78
+(`develop → main`). All three Foundational dashboards were completed through a
+parallel implementation and adversarial integration pass at feature commit
+`1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`:
+
+- FND-01 remains pinned to CUDOS v5.9.1 (19 sheets, 409 visuals, 142 controls),
+  now with incomplete-compatible-quantity ratio withholding and truthful
+  structured source-format rendering.
+- FND-02 now exposes bounded canonical OPTICS controls and exact bigint MoM
+  quantity evidence separated by currency and provider unit.
+- FND-03 now exposes versioned, non-overlapping mutation and complete history
+  states for all 19 governed goals, with exact resource authorization scope.
+
+The combined three-dashboard and active-generation repository matrix passed 130
+assertions; root typecheck, scoped ESLint, secret scan (2,670 files), diff check,
+and [exact-SHA PR CI run 32493632168](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32493632168)
+passed. No collector operation, IAM permission, persistence schema, migration,
+credential surface, main merge, deployment, provider acceptance, or live
+acceptance was added or claimed. All three remain
+`LOCAL_VERTICAL_CANDIDATE`; continue with controlled reconciliation and the
+shared fixed-tree/release gates, not with rebuilding the dashboards.
+
 ## Snapshot health
 
 These checks passed against `b75f751` after all agents were stopped:
@@ -48,9 +73,9 @@ The word **completed** below means `LOCAL_VERTICAL_CANDIDATE`: the dashboard's l
 
 | ID and dashboard | What is built and wired now | Local evidence / checkpoint | Still required before production |
 |---|---|---|---|
-| FND-01 CUDOS | Pinned 19-sheet/407-visual/142-control model; monthly, UTC-weekly and daily trends; FOCUS rankings; service-family modules; CUR2 completeness disclosure. | `docs/finops-cid-evidence/FND-01-cudos.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Provider telemetry/recommendations, commitment context, exact-layout parity, controlled two-tenant reconciliation, live acceptance and shared release gates. |
-| FND-02 Cost Intelligence | Pinned 10-sheet/77-visual/44-control model; currency-separated summaries/trends/MoM, bounded explorer, commitment expiry and per-sheet coverage. | `docs/finops-cid-evidence/FND-02-cost-intelligence.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Complete compute/storage quantities, RI/SP and OPTICS evidence, usage pivot, exact-tree, controlled reconciliation and live acceptance. |
-| FND-03 KPI and Modernization | Pinned v2.2.1 10-sheet/91-visual/94-control model; 19 governed formulas/goals; account/payer/period filters; native sheet views; corrected gp3 and one-year formulas. | `docs/finops-cid-evidence/FND-03-kpi-modernization.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Goal mutation UI, multi-generation MoM and authoritative inventory/activity/compatibility/pricing evidence; exact-tree, reconciliation and live acceptance. |
+| FND-01 CUDOS | Pinned v5.9.1 19-sheet/409-visual/142-control model; monthly, UTC-weekly and daily trends; FOCUS rankings; service-family modules; compatible-unit Bedrock token/cache usage and ratios; incomplete-quantity withholding; CUR2 completeness disclosure. | Feature `1eb00d5`; `docs/finops-cid-evidence/FND-01-cudos.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Provider telemetry/recommendations, inferred cache savings, commitment context, exact-layout parity, controlled two-tenant/provider reconciliation, live acceptance and shared release gates. |
+| FND-02 Cost Intelligence | Pinned 10-sheet/77-visual/44-control model; currency-separated summaries/trends/MoM spend and usage quantities; bounded canonical OPTICS controls/explorer; commitment expiry and per-sheet coverage. | Feature `1eb00d5`; `docs/finops-cid-evidence/FND-02-cost-intelligence.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Complete compute/storage quantities, full RI/SP evidence, unambiguous database engine/instance family/type/platform dimensions, exact-tree, controlled reconciliation and live acceptance. |
+| FND-03 KPI and Modernization | Pinned v2.2.1 10-sheet/91-visual/94-control model; 19 governed formulas with versioned mutation/history; account/payer/period filters; native sheet views; corrected gp3 and one-year formulas. | Feature `1eb00d5`; `docs/finops-cid-evidence/FND-03-kpi-modernization.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Multi-generation MoM and authoritative inventory/activity/compatibility/pricing evidence; exact-tree, controlled provider/two-tenant reconciliation and live acceptance. |
 | ADV-02 Compute Optimizer | Eight-export materialization; replay-safe launch/activation ledgers; exact-ID barrier; version-bound S3/CSVW reader; all-Region coordinator; immutable generation persistence; scheduler and all four handlers; signed STS activation; same-tenant API; 14-purpose exact-micros UI. | Feature `f96b73a`; tracker `9561050`; `docs/finops-cid-evidence/ADV-02-compute-optimizer.md`. | Activate exact `.8.5` IAM/broker secrets, controlled multi-Region provider reconciliation, two-tenant/live acceptance, authorized QuickSight geometry and fixed-tree release gates. |
 | ADV-03 Cost Anomaly | Pinned 2-sheet/6-visual/12-control model; null-aware provider analysis; actual/expected amounts; four-dimensional contribution; lifecycle/monitor/subscription coverage; safe export and six native mappings. | `docs/finops-cid-evidence/ADV-03-cost-anomaly.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Close four explicitly partial visual semantics, controlled payer/two-tenant reconciliation, exact-tree and live acceptance. |
 | ADV-04 Extended Support | Daily scheduler; durable replay ledger; immutable READY history; Ed25519 broker; STS ceiling; credential-owning route; pinned EKS/RDS/Aurora/OpenSearch/ElastiCache/Pricing reader; same-tenant API; native 3/6/12-month UI; immutable `.8.6`. | Feature `963a54e`; tracker `5ba771f`; `docs/finops-cid-evidence/ADV-04-extended-support.md`. | Approved AWS role attestation, authoritative CUR2/lifecycle/rate supplements, bill reconciliation, exact layout, two-tenant/live acceptance and release gates. |

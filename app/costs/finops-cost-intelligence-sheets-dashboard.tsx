@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { BarChart, RankingBars, TimeSeriesChart } from "../components/charts";
 import {
   EndpointBoundary,
@@ -9,7 +9,11 @@ import {
   formatMicrosExact,
   type FoundationalSourceEvidence,
 } from "./finops-foundational-panels";
-import { useCostIntelligenceEndpoint } from "./finops-foundational-endpoint";
+import {
+  DEFAULT_COST_INTELLIGENCE_FILTERS,
+  useCostIntelligenceEndpoint,
+  type CostIntelligenceEndpointFilters,
+} from "./finops-foundational-endpoint";
 import {
   FINOPS_COST_INTELLIGENCE_SHEETS,
   type FinopsSheetDescriptor,
@@ -20,7 +24,13 @@ import {
   foundationalStyles as styles,
 } from "./finops-foundational-sheet-shell";
 import { formatCount, formatUnits, microsToUnits } from "./finops-foundational-money";
-import type { FinopsCostIntelligenceReport } from "../../lib/finops-cost-intelligence";
+import {
+  FINOPS_COST_BASES,
+  FINOPS_COST_DIMENSIONS,
+  type FinopsCostDimension,
+  type FinopsCostIntelligenceReport,
+  type FinopsExplorerFilter,
+} from "../../lib/finops-cost-intelligence";
 
 /**
  * FND-02 Cost Intelligence, presented as the ten sheets AWS publishes.
@@ -65,6 +75,28 @@ function currenciesOf(report: Report): readonly string[] {
 
 function label(value: string): string {
   return value === UNALLOCATED ? "Unallocated" : value;
+}
+
+function dimensionLabel(value: string): string {
+  return value.replace(/_/gu, " ");
+}
+
+function formatQuantityMicrosExact(
+  quantityMicros: string | null,
+  unit: string,
+): string {
+  if (quantityMicros === null || !/^-?(?:0|[1-9]\d*)$/u.test(quantityMicros)) {
+    return "Not observed";
+  }
+  const amount = BigInt(quantityMicros);
+  const negative = amount < BigInt(0);
+  const absolute = negative ? -amount : amount;
+  const whole = (absolute / BigInt(1_000_000)).toLocaleString("en-US");
+  const fraction = (absolute % BigInt(1_000_000)).toString()
+    .padStart(6, "0").replace(/0+$/u, "");
+  return `${negative ? "−" : ""}${whole}${
+    fraction.length === 0 ? "" : `.${fraction}`
+  } ${unit}`;
 }
 
 /** Billing summary: invoiced scope, what the policy excludes, and why. */
@@ -385,45 +417,130 @@ function ExplorerSheet({ report, note }: { readonly report: Report; readonly not
   );
 }
 
-/** MoM pivot: the two-dimension spend pivot the official sheet publishes. */
+function UsagePivotSheet({ report }: { readonly report: Report }) {
+  const pivot = report.usageMomPivot;
+  if (pivot === undefined || pivot.status === "unavailable") {
+    return (
+      <NoEvidence
+        reason={pivot?.reason === "missing_usage_quantity_or_unit"
+          ? "Usage rows were observed, but no row carried both a valid integer quantity and an explicit provider unit."
+          : "No included usage row was observed for the compared periods, so a usage quantity pivot is unavailable."}
+      />
+    );
+  }
+  return (
+    <FinopsSheetBlock
+      description={`Observed canonical quantities keyed by provider unit. ${pivot.baselinePeriod} is compared with ${pivot.comparisonPeriod}; unlike units are never combined and a missing side is not rendered as zero.`}
+      title="Month-over-month usage quantity pivot"
+    >
+      {pivot.status === "partial" ? (
+        <div className={styles.coverage} data-support="PARTIAL" role="status">
+          <div className={styles.coverageHead}>
+            <strong>Partial usage quantity evidence</strong>
+          </div>
+          <ul className={styles.coverageGaps}>
+            <li>
+              {formatCount(pivot.missingEvidenceLineCount)} of {formatCount(pivot.eligibleLineCount)}
+              {" "}usage lines lacked a valid quantity or provider unit. Values below are observed
+              quantities, not complete totals.
+            </li>
+          </ul>
+        </div>
+      ) : null}
+      {pivot.cells.length === 0 ? (
+        <NoEvidence reason="No unit-compatible quantity cell was observed for the selected dimensions." />
+      ) : (
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <caption>
+              {formatCount(pivot.cells.length)} unit-separated cells · {formatCount(pivot.usableLineCount)}
+              {" "}usable usage lines.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">{pivot.dimensions[0]}</th>
+                <th scope="col">{pivot.dimensions[1]}</th>
+                <th scope="col">Currency scope</th>
+                <th scope="col">Provider unit</th>
+                <th className={styles.numeric} scope="col">{pivot.baselinePeriod}</th>
+                <th className={styles.numeric} scope="col">{pivot.comparisonPeriod}</th>
+                <th className={styles.numeric} scope="col">Delta</th>
+                <th className={styles.numeric} scope="col">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pivot.cells.map((cell) => (
+                <tr key={`${cell.currency}-${cell.usageUnit}-${cell.rowValue}-${cell.columnValue}`}>
+                  <th scope="row">{label(cell.rowValue)}</th>
+                  <td>{label(cell.columnValue)}</td>
+                  <td>{cell.currency}</td>
+                  <td>{cell.usageUnit}</td>
+                  <td className={styles.numeric}>
+                    {formatQuantityMicrosExact(cell.baselineQuantityMicros, cell.usageUnit)}
+                  </td>
+                  <td className={styles.numeric}>
+                    {formatQuantityMicrosExact(cell.comparisonQuantityMicros, cell.usageUnit)}
+                  </td>
+                  <td className={styles.numeric}>
+                    {formatQuantityMicrosExact(cell.deltaQuantityMicros, cell.usageUnit)}
+                  </td>
+                  <td className={styles.numeric}>
+                    {cell.deltaQuantityMicros === null
+                      ? "Not available"
+                      : formatBasisPoints(cell.deltaPercentBasisPoints)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </FinopsSheetBlock>
+  );
+}
+
+/** MoM pivot: exact spend and unit-separated quantity views. */
 function PivotSheet({ report }: { readonly report: Report }) {
   const { cells, dimensions, baselinePeriod, comparisonPeriod } = report.momPivot;
   if (cells.length === 0) {
     return <NoEvidence reason="The pivot produced no cell for the compared periods and dimensions." />;
   }
   return (
-    <FinopsSheetBlock
-      description={`${dimensions[0]} by ${dimensions[1]}, ${baselinePeriod} against ${comparisonPeriod}. The official usage pivot needs unit-compatible quantity evidence and is not shown.`}
-      title="Month-over-month spend pivot"
-    >
-      <div className={styles.tableWrap}>
-        <table className={styles.table}>
-          <caption>{formatCount(cells.length)} pivot cells, exact micro-unit amounts.</caption>
-          <thead>
-            <tr>
-              <th scope="col">{dimensions[0]}</th>
-              <th scope="col">{dimensions[1]}</th>
-              <th className={styles.numeric} scope="col">{baselinePeriod}</th>
-              <th className={styles.numeric} scope="col">{comparisonPeriod}</th>
-              <th className={styles.numeric} scope="col">Delta</th>
-              <th className={styles.numeric} scope="col">Change</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cells.map((cell, index) => (
-              <tr key={`${cell.rowValue}-${cell.columnValue}-${index}`}>
-                <th scope="row">{label(cell.rowValue)}</th>
-                <td>{label(cell.columnValue)}</td>
-                <td className={styles.numeric}>{formatMicrosExact(cell.baselineMicros, cell.currency)}</td>
-                <td className={styles.numeric}>{formatMicrosExact(cell.comparisonMicros, cell.currency)}</td>
-                <td className={styles.numeric}>{formatMicrosExact(cell.deltaMicros, cell.currency)}</td>
-                <td className={styles.numeric}>{formatBasisPoints(cell.deltaPercentBasisPoints)}</td>
+    <div className={styles.blocks}>
+      <FinopsSheetBlock
+        description={`${dimensions[0]} by ${dimensions[1]}, ${baselinePeriod} against ${comparisonPeriod}. Currency remains part of every spend cell.`}
+        title="Month-over-month spend pivot"
+      >
+        <div className={styles.tableWrap}>
+          <table className={styles.table}>
+            <caption>{formatCount(cells.length)} pivot cells, exact micro-unit amounts.</caption>
+            <thead>
+              <tr>
+                <th scope="col">{dimensions[0]}</th>
+                <th scope="col">{dimensions[1]}</th>
+                <th className={styles.numeric} scope="col">{baselinePeriod}</th>
+                <th className={styles.numeric} scope="col">{comparisonPeriod}</th>
+                <th className={styles.numeric} scope="col">Delta</th>
+                <th className={styles.numeric} scope="col">Change</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </FinopsSheetBlock>
+            </thead>
+            <tbody>
+              {cells.map((cell, index) => (
+                <tr key={`${cell.rowValue}-${cell.columnValue}-${index}`}>
+                  <th scope="row">{label(cell.rowValue)}</th>
+                  <td>{label(cell.columnValue)}</td>
+                  <td className={styles.numeric}>{formatMicrosExact(cell.baselineMicros, cell.currency)}</td>
+                  <td className={styles.numeric}>{formatMicrosExact(cell.comparisonMicros, cell.currency)}</td>
+                  <td className={styles.numeric}>{formatMicrosExact(cell.deltaMicros, cell.currency)}</td>
+                  <td className={styles.numeric}>{formatBasisPoints(cell.deltaPercentBasisPoints)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </FinopsSheetBlock>
+      <UsagePivotSheet report={report} />
+    </div>
   );
 }
 
@@ -559,14 +676,227 @@ export function FinopsCostIntelligenceSheets({
   );
 }
 
+function replaceExplorerFilter(
+  filters: readonly FinopsExplorerFilter[],
+  index: number,
+  next: FinopsExplorerFilter,
+): readonly FinopsExplorerFilter[] {
+  return filters.map((filter, current) => current === index ? next : filter);
+}
+
+function CostIntelligenceControls({
+  applied,
+  connectionAvailable,
+  onApply,
+}: {
+  readonly applied: CostIntelligenceEndpointFilters;
+  readonly connectionAvailable: boolean;
+  readonly onApply: (filters: CostIntelligenceEndpointFilters) => void;
+}) {
+  const [draft, setDraft] = useState<CostIntelligenceEndpointFilters>(applied);
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onApply({
+      ...draft,
+      explorerFilters: draft.explorerFilters.filter(({ value }) => value.length > 0),
+    });
+  };
+  const reset = () => {
+    const next: CostIntelligenceEndpointFilters = {
+      ...DEFAULT_COST_INTELLIGENCE_FILTERS,
+      explorerFilters: [],
+    };
+    setDraft(next);
+    onApply(next);
+  };
+  return (
+    <section aria-label="Cost Intelligence OPTICS controls">
+      <form className={styles.toolbar} onSubmit={submit}>
+        <div className={styles.field}>
+          <label htmlFor="cid-cost-basis">Cost basis</label>
+          <select
+            disabled={!connectionAvailable}
+            id="cid-cost-basis"
+            onChange={(event) => setDraft({
+              ...draft,
+              costBasis: event.target.value as CostIntelligenceEndpointFilters["costBasis"],
+            })}
+            value={draft.costBasis}
+          >
+            {FINOPS_COST_BASES.map((basis) => (
+              <option key={basis} value={basis}>{dimensionLabel(basis)}</option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="cid-allocation-mode">Allocation</label>
+          <select
+            disabled={!connectionAvailable}
+            id="cid-allocation-mode"
+            onChange={(event) => setDraft({
+              ...draft,
+              allocationMode: event.target.value as CostIntelligenceEndpointFilters["allocationMode"],
+            })}
+            value={draft.allocationMode}
+          >
+            <option value="showback">Showback</option>
+            <option value="chargeback">Chargeback</option>
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="cid-group-one">Group by level 1</label>
+          <select
+            disabled={!connectionAvailable}
+            id="cid-group-one"
+            onChange={(event) => {
+              const pivotRow = event.target.value as FinopsCostDimension;
+              const pivotColumn = pivotRow === draft.pivotColumn
+                ? FINOPS_COST_DIMENSIONS.find((dimension) => dimension !== pivotRow) ?? "service"
+                : draft.pivotColumn;
+              setDraft({ ...draft, pivotRow, pivotColumn });
+            }}
+            value={draft.pivotRow}
+          >
+            {FINOPS_COST_DIMENSIONS.map((dimension) => (
+              <option key={dimension} value={dimension}>{dimensionLabel(dimension)}</option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="cid-group-two">Group by level 2</label>
+          <select
+            disabled={!connectionAvailable}
+            id="cid-group-two"
+            onChange={(event) => {
+              const pivotColumn = event.target.value as FinopsCostDimension;
+              const pivotRow = pivotColumn === draft.pivotRow
+                ? FINOPS_COST_DIMENSIONS.find((dimension) => dimension !== pivotColumn) ?? "account"
+                : draft.pivotRow;
+              setDraft({ ...draft, pivotRow, pivotColumn });
+            }}
+            value={draft.pivotColumn}
+          >
+            {FINOPS_COST_DIMENSIONS.map((dimension) => (
+              <option key={dimension} value={dimension}>{dimensionLabel(dimension)}</option>
+            ))}
+          </select>
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="cid-explorer-period">Explorer month</label>
+          <input
+            disabled={!connectionAvailable}
+            id="cid-explorer-period"
+            onChange={(event) => setDraft({ ...draft, explorerPeriod: event.target.value })}
+            type="month"
+            value={draft.explorerPeriod}
+          />
+        </div>
+        <div className={styles.field}>
+          <label htmlFor="cid-explorer-limit">Result limit</label>
+          <select
+            disabled={!connectionAvailable}
+            id="cid-explorer-limit"
+            onChange={(event) => setDraft({ ...draft, explorerLimit: Number(event.target.value) })}
+            value={draft.explorerLimit}
+          >
+            {[25, 50, 100, 200].map((limit) => <option key={limit}>{limit}</option>)}
+          </select>
+        </div>
+
+        {draft.explorerFilters.map((filter, index) => (
+          <div className={styles.toolbar} key={`${index}-${filter.dimension}`}>
+            <div className={styles.field}>
+              <label htmlFor={`cid-filter-dimension-${index}`}>Filter {index + 1}</label>
+              <select
+                disabled={!connectionAvailable}
+                id={`cid-filter-dimension-${index}`}
+                onChange={(event) => setDraft({
+                  ...draft,
+                  explorerFilters: replaceExplorerFilter(draft.explorerFilters, index, {
+                    ...filter,
+                    dimension: event.target.value as FinopsCostDimension,
+                  }),
+                })}
+                value={filter.dimension}
+              >
+                {FINOPS_COST_DIMENSIONS.map((dimension) => (
+                  <option key={dimension} value={dimension}>{dimensionLabel(dimension)}</option>
+                ))}
+              </select>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor={`cid-filter-value-${index}`}>Exact value</label>
+              <input
+                disabled={!connectionAvailable}
+                id={`cid-filter-value-${index}`}
+                maxLength={256}
+                onChange={(event) => setDraft({
+                  ...draft,
+                  explorerFilters: replaceExplorerFilter(draft.explorerFilters, index, {
+                    ...filter,
+                    value: event.target.value,
+                  }),
+                })}
+                value={filter.value}
+              />
+            </div>
+            <button
+              className="button button-secondary"
+              disabled={!connectionAvailable}
+              onClick={() => setDraft({
+                ...draft,
+                explorerFilters: draft.explorerFilters.filter((_, current) => current !== index),
+              })}
+              type="button"
+            >
+              Remove filter
+            </button>
+          </div>
+        ))}
+
+        <button
+          className="button button-secondary"
+          disabled={!connectionAvailable || draft.explorerFilters.length >= 8}
+          onClick={() => setDraft({
+            ...draft,
+            explorerFilters: [...draft.explorerFilters, { dimension: "service", value: "" }],
+          })}
+          type="button"
+        >
+          Add exact filter
+        </button>
+        <button className="button button-primary" disabled={!connectionAvailable} type="submit">
+          Apply controls
+        </button>
+        <button className="button button-secondary" disabled={!connectionAvailable} onClick={reset} type="button">
+          Reset
+        </button>
+      </form>
+      <p className={styles.goalMeta}>
+        Controls are limited to canonical CUR/FOCUS fields and eight exact filters. Database engine,
+        instance type family, instance type, and platform stay unavailable when the accepted export
+        does not carry an unambiguous first-class value.
+      </p>
+    </section>
+  );
+}
+
 export function FinopsCostIntelligenceSheetsDashboard({
   connectionId,
 }: { readonly connectionId: string | null }) {
-  const { state, reload } = useCostIntelligenceEndpoint(connectionId);
+  const [filters, setFilters] = useState<CostIntelligenceEndpointFilters>(
+    DEFAULT_COST_INTELLIGENCE_FILTERS,
+  );
+  const { state, reload } = useCostIntelligenceEndpoint(connectionId, filters);
   const envelope = state.status === "ready" && "envelope" in state ? state.envelope : null;
 
   return (
     <section aria-label="Cost Intelligence dashboard" className={styles.shell}>
+      <CostIntelligenceControls
+        applied={filters}
+        connectionAvailable={connectionId !== null}
+        onApply={setFilters}
+      />
       <EndpointBoundary onRetry={reload} state={state} title="the Cost Intelligence dashboard" />
       {envelope === null ? null : <FinopsCostIntelligenceSheets envelope={envelope} />}
     </section>

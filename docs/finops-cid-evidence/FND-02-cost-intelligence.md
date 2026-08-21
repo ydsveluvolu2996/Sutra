@@ -1,6 +1,6 @@
 # FND-02 — Cost Intelligence Dashboard evidence record
 
-Reviewed: 2026-08-02
+Reviewed: 2026-08-21
 
 Official guidance: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/cudos-cid-kpi.html#cost-intelligence-dashboard-cid>
 
@@ -47,15 +47,16 @@ operation, region, usage type, and purchase option.
 | Storage Summary | Canonical product, resource, usage quantity/unit, and cost fields are retained; S3 bucket/EBS volume semantics and complete coverage are not asserted from ambiguous rows | `PARTIAL_EVIDENCE` |
 | RI/SP Summary | Evidence-backed commitment costs, utilization inputs, expiry, net savings, and coverage completeness are available; route deliberately marks unused charge, public on-demand cost, and quantity coverage incomplete | `PARTIAL_EVIDENCE` |
 | Expiring RI/SP Tracker | Native expiry table with terms, account/owner, gross/used/unused cost, on-demand equivalent, net savings, coverage state, and untrackable-row disclosure | `IMPLEMENTED_LOCAL` |
-| OPTICS Explorer | Route now activates a 50-row, 1,000-cardinality bounded explorer over an allow-listed pair of dimensions | `PARTIAL_CONTROL_PARITY` |
-| MoM Pivot | Native exact spend pivot with baseline, comparison, signed delta, and percentage state | `IMPLEMENTED_LOCAL` |
+| OPTICS Explorer | Native controls expose two group levels, month, result limit, and up to eight exact filters over the canonical allow-listed dimensions. The API rejects unknown, duplicate, overlong, over-limit, and ambiguous inputs. | `PARTIAL_CONTROL_PARITY` |
+| MoM Pivot | Native exact spend and usage-quantity pivots expose baseline, comparison, signed delta, and percentage state. Quantity rows are separated by currency and provider unit and fail closed as partial/unavailable when evidence is incomplete. | `IMPLEMENTED_LOCAL` |
 | Summary of Changes / About | This pinned evidence record, freshness strip, cost-basis disclosure, and explicit incomplete-data states | `IMPLEMENTED_LOCAL` |
 
 This is semantic native coverage, not a claim that Sutra reproduces the
 QuickSight layout pixel-for-pixel. Product-specific compute/storage visuals and
-the full set of interactive account/OPTICS controls remain evidence-gated gaps;
-they must not be filled with inferred quantities, fabricated dimensions, or a
-different cost basis.
+dimensions that canonical rows do not identify unambiguously remain
+evidence-gated gaps; database engine, instance family/type, and platform are
+therefore unavailable rather than inferred. They must not be filled with
+fabricated dimensions, combined units, or a different cost basis.
 
 ## Gate evidence
 
@@ -63,8 +64,8 @@ different cost basis.
 |---|---|---|
 | G0 requirements | `VERIFIED` | Immutable commit/path/hash plus exact 10-sheet/77-visual/44-control inventory is enforced by `finops-cost-intelligence-official-definition.test.mjs`. |
 | G1–G3 source/pipeline | `IMPLEMENTED_UNVERIFIED` | Shares the correction-safe CUR2 ingestion and active-generation persistence path with FND-01; exact-tree and controlled provider evidence remain outstanding. |
-| G4 API | `VERIFIED_LOCAL` | Authenticated tenant scope, one canonical export history, 36-period/250,000-row bounds, strict query allow-list, activated bounded explorer, explicit forecast options, and conservative commitment completeness. |
-| G5 visual UI | `VERIFIED_LOCAL` | Immutable 10-sheet coverage navigator, per-sheet parity gaps, billing summary, trend, movers, forecast, spend pivot, bounded explorer, expiry tracker, allocation, evidence/freshness states, and exact-currency rendering are under UI contract tests. The immutable official-source audit remains visible in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact commit, path, and SHA-256; the local constant is only the no-response fallback. |
+| G4 API | `VERIFIED_LOCAL` | Authenticated tenant scope, one canonical export history, 36-period/250,000-row bounds, strict query allow-list and multiplicity/length checks, bounded explorer controls, explicit forecast options, exact quantity pivot, and conservative commitment completeness. |
+| G5 visual UI | `VERIFIED_LOCAL` | Immutable 10-sheet coverage navigator, per-sheet parity gaps, billing summary, trend, movers, forecast, spend/usage pivots, bounded OPTICS control panel and explorer, expiry tracker, allocation, evidence/freshness states, and exact-currency/unit rendering are under UI contract tests. The immutable official-source audit remains visible in loading, configuration, waiting, incomplete, error, null-report, and ready states. Successful API definitions must match the exact commit, path, and SHA-256; the local constant is only the no-response fallback. |
 | G6 focused verification | `VERIFIED` | Focused engine, route, official-definition, and UI contract suite passes locally; commands and count are recorded below. |
 | G7–G10 | `NOT_STARTED` | Exact-tree, controlled two-tenant/provider, release, deployment, rollback, and live visual evidence remain release-level gates. |
 
@@ -91,7 +92,26 @@ node --experimental-strip-types --test \
   tests/finops-foundational-ui-contract.test.mjs
 ```
 
-Result: **24 passed, 0 failed, 0 skipped**.
+Result at feature commit `1eb00d50f6b360f0582bf0dbbe15d9fd2478112e`:
+**26 passed, 0 failed, 0 skipped**.
+
+## Control and quantity closure — 2026-08-21
+
+The bounded OPTICS and MoM quantity slice is included in feature checkpoint
+`1eb00d50f6b360f0582bf0dbbe15d9fd2478112e` on `develop`;
+[standing PR #78 CI run 32493632168](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32493632168)
+passed for that exact SHA. Maturity remains `LOCAL_VERTICAL_CANDIDATE`.
+
+- Both group levels, month, result limit, and eight exact filters are native UI
+  controls and server-enforced API inputs over canonical dimensions only.
+- The MoM usage pivot retains bigint quantities and never combines billing
+  currencies or raw provider units. Missing quantities are partial/unavailable,
+  never a synthetic zero.
+- Tenant/customer/connection scope remains server-derived. No credential field,
+  AWS SDK call, collector permission, persistence schema, or migration changed.
+- Complete compute/storage quantities, full RI/SP evidence, unambiguous database
+  engine/instance family/type/platform evidence, exact-tree parity, controlled
+  two-tenant/provider reconciliation, and signed-in live acceptance remain.
 
 ## Merge record — 2026-08-06
 

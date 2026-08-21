@@ -41,7 +41,7 @@ test("native CUDOS overview renders the exact official sheet inventory", async (
     for (const expected of [
       "Report-independent official AWS CUDOS definition",
       "Official CUDOS v5 source audit",
-      "19 sheets · 407 visuals · 142 controls",
+      "19 sheets · 409 visuals · 142 controls",
       "This source audit remains visible without a billing report",
       "19 official sheets and native evidence gaps",
     ]) assert.match(auditHtml, new RegExp(expected, "iu"), expected);
@@ -81,7 +81,7 @@ test("native CUDOS overview renders the exact official sheet inventory", async (
       { envelope },
     ));
     for (const expected of [
-      "19 sheets · 407 visuals · 142 controls",
+      "19 sheets · 409 visuals · 142 controls",
       "Executive: Billing Summary",
       "Executive: RI/SP Summary",
       "Executive: Trends",

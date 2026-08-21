@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   cudosUrl,
-  costIntelligenceUrl,
   kpiUrl,
   readEnvelope,
   stateForEnvelope,
@@ -15,6 +14,12 @@ import {
   type EndpointState,
   type KpiEnvelope,
 } from "./finops-foundational-panels";
+import type {
+  FinopsAllocationMode,
+  FinopsCostBasis,
+  FinopsCostDimension,
+  FinopsExplorerFilter,
+} from "../../lib/finops-cost-intelligence";
 
 /**
  * One loader for the three Foundational endpoints.
@@ -122,11 +127,60 @@ export function useCudosEndpoint(connectionId: string | null): FoundationalEndpo
   );
 }
 
+export interface CostIntelligenceEndpointFilters {
+  readonly costBasis: FinopsCostBasis;
+  readonly allocationMode: FinopsAllocationMode;
+  readonly moverDimension: FinopsCostDimension;
+  readonly pivotRow: FinopsCostDimension;
+  readonly pivotColumn: FinopsCostDimension;
+  readonly explorerPeriod: string;
+  readonly explorerLimit: number;
+  readonly explorerFilters: readonly FinopsExplorerFilter[];
+}
+
+export const DEFAULT_COST_INTELLIGENCE_FILTERS: CostIntelligenceEndpointFilters =
+  Object.freeze({
+    costBasis: "amortized",
+    allocationMode: "showback",
+    moverDimension: "service",
+    pivotRow: "business_unit",
+    pivotColumn: "service",
+    explorerPeriod: "",
+    explorerLimit: 50,
+    explorerFilters: Object.freeze([]),
+  });
+
+/** Build only the allow-listed Cost Intelligence query shape accepted by the API. */
+export function costIntelligenceRequestUrl(
+  connectionId: string,
+  filters: CostIntelligenceEndpointFilters,
+): string {
+  const query = new URLSearchParams({
+    connectionId,
+    costBasis: filters.costBasis,
+    allocationMode: filters.allocationMode,
+    moverDimension: filters.moverDimension,
+    pivotRow: filters.pivotRow,
+    pivotColumn: filters.pivotColumn,
+    explorerLimit: String(filters.explorerLimit),
+  });
+  if (filters.explorerPeriod !== "") {
+    query.set("explorerPeriod", filters.explorerPeriod);
+  }
+  filters.explorerFilters.slice(0, 8).forEach((filter) => {
+    query.append("explorerFilter", `${filter.dimension}:${filter.value}`);
+  });
+  return `/api/v1/finops/cost-intelligence?${query.toString()}`;
+}
+
 export function useCostIntelligenceEndpoint(
   connectionId: string | null,
+  filters: CostIntelligenceEndpointFilters = DEFAULT_COST_INTELLIGENCE_FILTERS,
 ): FoundationalEndpointResult<CostIntelligenceEnvelope> {
   return useEndpoint<CostIntelligenceEnvelope>(
-    connectionId === null ? null : costIntelligenceUrl(connectionId),
+    connectionId === null
+      ? null
+      : costIntelligenceRequestUrl(connectionId, filters),
     connectionId,
     SCHEMA.costIntelligence,
     validCostIntelligenceEnvelope,

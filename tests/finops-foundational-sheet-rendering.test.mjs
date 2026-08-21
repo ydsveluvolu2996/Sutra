@@ -40,7 +40,8 @@ const CUDOS_REPORT = {
     organizationId: "org_1", customerId: "cus_1", connectionId: `conn_${"a".repeat(32)}`,
     exportName: "foundational-cur2-export-v1", billingPeriod: "2026-07",
     generationId: `fbg_${"b".repeat(64)}`, activeLineCount: 4210,
-    sourceFormats: ["parquet"], currencies: ["USD"], evidenceWindow: null,
+    sourceFormats: [{ sourceFormat: "aws-cur", sourceVersion: "2.0", lineCount: 4210 }],
+    currencies: ["USD"], evidenceWindow: null,
   },
   executive: [{
     currency: "USD", lineCount: 4210, accountCount: 12, serviceCount: 34,
@@ -114,6 +115,26 @@ const CUDOS_REPORT = {
     }],
     totalMetrics: 1, truncated: false,
     invariant: "currencies_and_usage_units_are_never_combined",
+  },
+  bedrockTokens: {
+    status: "complete", classifiedLineCount: 3, usableLineCount: 3,
+    missingUsageEvidenceLineCount: 0,
+    invariant: "currencies_and_raw_usage_units_are_never_normalized_or_combined",
+    buckets: [{
+      period: "2026-07", currency: "USD", usageUnit: "1M Tokens", lineCount: 3,
+      usage: {
+        input: { lineCount: 1, quantityMicros: "100000000" },
+        output: { lineCount: 0, quantityMicros: null },
+        cache_read: { lineCount: 1, quantityMicros: "50000000" },
+        cache_write: { lineCount: 1, quantityMicros: "25000000" },
+      },
+      ratioStatus: "complete", cacheReadRatioBasisPoints: "2857",
+      cacheWriteRatioBasisPoints: "1428", ratioUnavailableReason: null,
+    }],
+    cacheCostSavings: {
+      status: "unavailable", savingsBasisPoints: null,
+      reason: "compatible_uncached_input_rate_is_not_authoritative_in_canonical_rows",
+    },
   },
   opportunities: {
     estimates: [{
@@ -313,6 +334,15 @@ test("CUDOS prints exact micro amounts and keeps credits negative", () => {
   assert.ok(billing.includes("Proven absent"));
 });
 
+test("CUDOS lineage formats the canonical source identity object", () => {
+  const html = render(cudos.FinopsCudosSheetContent, {
+    report: CUDOS_REPORT,
+    sheet: sheets.findSheet(sheets.FINOPS_CUDOS_SHEETS, "about"),
+  });
+  assert.ok(html.includes("aws-cur 2.0 (4,210 lines)"));
+  assert.equal(html.includes("[object Object]"), false);
+});
+
 test("a CUDOS trend gap is a gap, never a zero", () => {
   const html = render(cudos.FinopsCudosSheetContent, {
     report: CUDOS_REPORT,
@@ -340,6 +370,38 @@ test("a CUDOS module sheet with no classified line proves absence rather than sh
   });
   assert.ok(html.includes("proven absence"), "an unclassified module must state proven absence");
   assert.equal(html.includes("$0.00"), false, "absence must not be rendered as zero cost");
+});
+
+test("CUDOS AI/ML renders Bedrock token usage and cache ratios without invented evidence", () => {
+  const html = render(cudos.FinopsCudosSheetContent, {
+    report: CUDOS_REPORT,
+    sheet: sheets.findSheet(sheets.FINOPS_CUDOS_SHEETS, "ai-ml"),
+  });
+  assert.ok(html.includes("Amazon Bedrock Tokens Usage per UsageType Group"));
+  assert.ok(html.includes("Amazon Bedrock Tokens Cache Read and Cache Write Ratio"));
+  assert.ok(html.includes("100,000,000 usage micros"));
+  assert.ok(html.includes("28.57%"));
+  assert.ok(html.includes("14.28%"));
+  assert.ok(html.includes("Unavailable"), "unobserved output tokens must not render as zero");
+  assert.ok(html.includes("Bedrock Cache Cost Savings % — withheld"));
+});
+
+test("CUDOS AI/ML explains a compatible missing quantity and withholds its ratios", () => {
+  const report = structuredClone(CUDOS_REPORT);
+  report.bedrockTokens.status = "partial";
+  report.bedrockTokens.missingUsageEvidenceLineCount = 1;
+  report.bedrockTokens.buckets[0].ratioStatus = "partial";
+  report.bedrockTokens.buckets[0].cacheReadRatioBasisPoints = null;
+  report.bedrockTokens.buckets[0].cacheWriteRatioBasisPoints = null;
+  report.bedrockTokens.buckets[0].ratioUnavailableReason =
+    "missing_usage_quantity";
+  const html = render(cudos.FinopsCudosSheetContent, {
+    report,
+    sheet: sheets.findSheet(sheets.FINOPS_CUDOS_SHEETS, "ai-ml"),
+  });
+  assert.ok(html.includes("missing usage quantity"));
+  assert.equal(html.includes("28.57%"), false);
+  assert.equal(html.includes("14.28%"), false);
 });
 
 test("every Cost Intelligence sheet renders content", () => {
@@ -414,15 +476,18 @@ test("an unmeasured KPI states its reason instead of showing a value", () => {
   );
 });
 
-test("KPI goals are presented read-only with their authorization evidence", () => {
+test("KPI goals expose governed mutation and immutable history with authorization evidence", () => {
   const html = render(kpi.FinopsKpiSheetContent, {
     report: KPI_REPORT,
     sheet: sheets.findSheet(sheets.FINOPS_KPI_SHEETS, "set-kpi-goals"),
     goalsConfigured: 7,
   });
-  assert.ok(html.includes("read-only"), "the goals panel must state that it does not mutate");
+  assert.ok(html.includes("Governed goal change"), "the governed mutation panel must render");
+  assert.ok(html.includes("Save immutable version"), "the immutable save action must render");
+  assert.ok(html.includes("Goal version history"), "the immutable history panel must render");
   assert.ok(html.includes("dec-0"), "the authorization decision must be shown");
   assert.ok(html.includes("50.00%"), "the exact target must be shown");
+  assert.equal(html.includes("deliberately read-only"), false);
 });
 
 test("KPI withholds a savings estimate with no approved assumption", () => {
@@ -443,7 +508,8 @@ test("the sheet shell exposes real tabs for every official sheet", () => {
   assert.equal((html.match(/role="tabpanel"/gu) ?? []).length, 1);
   assert.equal((html.match(/aria-selected="true"/gu) ?? []).length, 1);
   // The pinned definition totals are shown so the reader knows what is mirrored.
-  assert.ok(html.includes("407"));
+  assert.ok(html.includes("409"));
+  assert.ok(html.includes("v5.9.1"));
   assert.ok(html.includes("19"));
 
   const cidHtml = render(cid.FinopsCostIntelligenceSheets, { envelope: CID_ENVELOPE });
