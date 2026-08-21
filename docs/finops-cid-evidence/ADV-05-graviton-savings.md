@@ -4,7 +4,7 @@ Reviewed: 2026-08-01
 
 Official source: <https://docs.aws.amazon.com/guidance/latest/cloud-intelligence-dashboards/graviton-savings-dashboard.html>
 
-Current maturity: `NATIVE_FUNCTIONAL_WITH_PROVIDER_GAPS`
+Current maturity: `LOCAL_VERTICAL_CANDIDATE`
 
 ## Official coverage
 
@@ -65,7 +65,7 @@ layout or styling claim.
 | API | `LOCAL_COMPLETE` | Authenticated same-tenant `connection:read` API with bounded filters, freshness, accepted/latest lineage, honest configuration state, and frozen official-definition evidence in configured and configuration-required responses. |
 | Native UI | `LOCAL_COMPLETE_WITH_EXPLICIT_GAPS` | All seven official sheets and exact object/control counts are visible with evidence/gap mappings; existing ARM64 usage, four-service economics, trends, evidence-class separation, blockers, drilldown and safe visible-row export remain native. |
 | Focused verification | `LOCAL_COMPLETE` | Engine and vertical suites cover exact micros, service contracts, provider-estimate restrictions, missing compatibility, reconciliation, adversarial scope, immutable heads, API and SSR UI. |
-| Live provider/deployment | `OPEN` | No production collector adapter, scheduled materialization, provider reconciliation, reviewed release, image or live acceptance is claimed. |
+| Live provider/deployment | `PENDING_EXTERNAL_ACCEPTANCE` | The production collector boundary and scheduled materialization are locally registered. Real AWS reconciliation, signed-in two-tenant acceptance, reviewed release, image, and live acceptance are not claimed. |
 
 ## G1-G6 status
 
@@ -73,10 +73,10 @@ layout or styling claim.
 |---|---|---|
 | G1 — official requirements and visual inventory | `VERIFIED` | Immutable manifest/definition hashes plus exact sheet, visual-type, control, parameter, calculated-field, filter-group, column-configuration, and dataset counts are frozen and arithmetically tested. |
 | G2 — source/materializer contract | `LOCAL_COMPLETE` | Four service families, canonical CUR2/pricing/inventory/metadata, recommendation authority, compatibility dimensions, bounds and no-inference policy are explicit. |
-| G3 — durable runtime/replay | `PARTIAL` | Prevalidated identity-only daily scheduling, deterministic request identity, strict five-attempt jobs and validated signed receipt verification are implemented and tested. Durable handler registration, real archive/sealer, credential broker and provider adapter remain open. |
+| G3 — durable runtime/replay | `LOCAL_COMPLETE` | Prevalidated identity-only daily scheduling, deterministic request identity, strict five-attempt jobs, CAS lease/replay, immutable signed receipts, shared handler/tick registration, evidence signer, broker, and collector provider route are implemented and tested. |
 | G4 — persistence/API | `LOCAL_COMPLETE` | Immutable complete-only head, registered SQLite/Postgres migrations, tenant-scoped authenticated API, bounded filters/cursor, history and freshness. |
 | G5 — native UI | `LOCAL_COMPLETE_WITH_EXPLICIT_GAPS` | All seven official sheet contracts render with exact upstream counts and native evidence mapping. Existing usage, service economics, trends, eligibility, blockers and evidence render. Instance Mapping, EC2 generation/performance controls, tags and managed-service RI/purchase-option analysis remain visibly open; exact layout parity is not claimed. |
-| G6 — validation/acceptance | `PARTIAL` | Focused engine, runtime, persistence, route and SSR tests plus lint/type checks pass locally. Live AWS, exact-tree browser/a11y and production smoke evidence remain open. |
+| G6 — validation/acceptance | `LOCAL_COMPLETE` | At baseline `2e9b8a7`, focused engine, runtime, persistence, route, cross-tenant, SSR, provider-route, permission/predecessor, SQLite/PostgreSQL migration, typecheck/build, ESLint, secret, and CloudFormation checks pass locally. Live AWS, signed-in exact-tree browser/a11y, and production smoke evidence remain external. |
 
 ## Evidence-honesty rules
 
@@ -114,25 +114,23 @@ layout or styling claim.
 
 ## Remaining provider and activation gaps
 
-1. Register the durable job handler and bind a persistent signed-receipt
-   archive, verifier, sealer and credential-owning collector adapter.
-2. Bind complete Compute Optimizer coverage where AWS publishes it, exact
+1. Bind complete Compute Optimizer coverage where AWS publishes it, exact
    OpenSearch/ElastiCache inventory, AWS Price List products, canonical CUR2,
    service metadata and approved workload/license attestations.
-3. Confirm live feature/engine/version compatibility for Aurora, OpenSearch and
+2. Confirm live feature/engine/version compatibility for Aurora, OpenSearch and
    ElastiCache; managed-service inventory alone is not compatibility proof.
-4. Implement the currently disclosed standalone Instance Mapping table,
+3. Implement the currently disclosed standalone Instance Mapping table,
    generation/performance, cost-allocation tag, purchase-option/RI and
    service-specific controls before claiming functional control parity. Exact
    QuickSight layout parity is intentionally not claimed.
-5. Run two-tenant, multi-account/Region, pagination/throttling, history,
+4. Run two-tenant, multi-account/Region, pagination/throttling, history,
    reconciliation, empty/partial and provider-correction acceptance.
-6. Complete reviewed release, immutable image deployment and live UI acceptance.
+5. Complete reviewed release, immutable image deployment and live UI acceptance.
 
-Until these gates pass, the API reports
-`GRAVITON_CROSS_SERVICE_MATERIALIZER_NOT_DEPLOYED`. This vertical is locally
-implemented but has not passed the exact-tree, provider, or live acceptance
-gates.
+Until configured authority and provider evidence exists, the API preserves
+configuration-required/collecting/failed states and the last accepted snapshot;
+it does not report a truthful-looking zero. This vertical is a local candidate
+and has not passed provider, exact-tree signed-in, or live acceptance gates.
 
 ## Focused validation
 
@@ -181,3 +179,102 @@ two-tenant acceptance is claimed.
   (`tests/finops-dashboard-identity.test.mjs`). This is UI rendering work only:
   no source contract, collector operation, migration, API shape, or evidence
   semantic changed, and no G5 or G6 stage status is promoted by it.
+
+## Closure worksheet — 2026-08-21
+
+### Identity and starting state
+
+| Field | Value |
+|---|---|
+| Dashboard ID and name | ADV-05 — Graviton Savings Dashboard |
+| Sutra dashboard ID | `graviton_savings` |
+| Starting branch | `develop` |
+| Starting SHA | `2e9b8a7d76a91e711d79e9a0c739d278fb2c2c1c` |
+| Required predecessor | Immutable `standard-2026-08.11` permission pack |
+| Permission reservation | `standard-2026-08.12` |
+| Drizzle/PostgreSQL reservations | `0122` / `0118` |
+| Primary implementer / shared-file integrator | Codex `/root`; no parallel agents |
+| Aliases searched | `graviton`, `graviton_savings`, `graviton-savings`, `standard-2026-08.12`, `0122_finops_graviton_runtime`, `0118_finops_graviton_runtime` |
+
+The clean starting state was `develop...origin/develop` at the SHA above, with
+Node `v22.23.2` and pnpm `11.13.1`. `pnpm work:start` completed successfully and
+confirmed the same remote SHA.
+
+### Existing-asset reuse inventory
+
+| Surface | Existing files/symbols | Classification | Proof or exact gap | Planned action |
+|---|---|---|---|---|
+| Official definition/evidence | `lib/finops-graviton-savings-official-definition.ts`, this record | `REUSE_AS_IS` | Pinned upstream commit, hashes, seven sheets, and exact object inventory are already tested. | Freeze; refresh same-SHA verification evidence only. |
+| Domain/formulas | `lib/finops-graviton-savings.ts`, `lib/finops-graviton-dashboard.ts` | `REUSE_AS_IS` | Exact micros, currency separation, no family-name inference, explicit blockers, and output bounds exist. | Freeze unless a focused test fails. |
+| Collector adapter and SDK reader | `services/aws-collector/src/graviton-savings-{provider-adapter,sdk-reader}.ts` | `REUSE_AS_IS` | Credential-owned bounded AWS SDK calls and fail-closed empty authority-dependent projections exist; provider reconciliation remains external. | Verify route/provider tests; retain `PENDING_EXTERNAL_ACCEPTANCE`. |
+| Provider route/session/IAM | provider route, permission contract, session policy, role broker, local server, immutable `.8.12` template | `REUSE_AS_IS` | Exact tenant/customer/connection/request/deadline binding and enumerated read-only actions are registered. | Run permission, predecessor, route, and CloudFormation checks. |
+| Persistence and registries | Drizzle `0122`, PostgreSQL `0118`, runtime repositories, all three registries | `REUSE_AS_IS` | Commit `43c625d` contains the previously missing PostgreSQL runtime registration; closure test names each registry independently. | Run SQLite/PostgreSQL parity and runtime tests. |
+| Runtime/orchestration | production composition, signed broker, evidence signer, background handler, daily tick | `REUSE_AS_IS` | Durable lease/replay, immutable successful receipt, signed transport, and scheduled handler are registered. | Run production/runtime and shared-handler tests. |
+| Authenticated API | `app/api/v1/finops/graviton-savings/route.ts` | `REUSE_AS_IS` | Server-derived membership scope, bounded filters, truthful runtime status, and last-good snapshot behavior exist. | Run route/vertical and cross-tenant tests. |
+| Native UI | dashboard TSX/CSS and dashboard registry | `REUSE_AS_IS` | Seven-sheet native view and explicit unavailable/configuration/failed/ready semantics exist. | Run SSR/render and accessibility-contract tests. |
+| Focused/shared tests | Graviton engine, vertical, runtime, provider-route, closure, permissions, migrations | `REUSE_AS_IS` | Coverage includes scope mismatch, replay, lease, immutable heads, signed transport, bounds, registry parity, and predecessor preservation. | Rerun at the current fixed SHA. |
+| Documentation/tracker | this record and `docs/FINOPS_CID_IMPLEMENTATION_TRACKER.md` | `REPAIR` | Source still describes shared integration and PostgreSQL `0118` registration as missing although both landed in `43c625d`. | Update only after the final verification matrix passes. |
+
+### Frozen reuse set and bounded edit set
+
+All implementation files listed above are frozen unless a named verification
+failure proves a repair is required. The initial bounded edit set is:
+
+```text
+docs/finops-cid-evidence/ADV-05-graviton-savings.md
+docs/FINOPS_CID_IMPLEMENTATION_TRACKER.md
+docs/CLOUDAWARE_AWS_IMPLEMENTATION_LEDGER.md
+```
+
+### Contract decisions
+
+| Question | Decision and authoritative basis |
+|---|---|
+| Provider operations | The 15 exact read-only actions in `GRAVITON_PROVIDER_SESSION_ACTIONS`; immutable `.8.12` adds only those actions to `.8.11`. |
+| Bounds/deadline | 15-minute deadline, 1,000 accounts, 50 Regions, bounded record/byte counts, token replay rejection, and exhaustion evidence. |
+| Identity binding | Organization, customer, connection, account, partition, Region, request key, and deadline are derived and revalidated server-side. |
+| Replay/persistence | One deterministic daily request identity; CAS lease; immutable `SUCCEEDED` receipt; complete-only monotonic snapshot head. |
+| Evidence | Tenant-bound signed broker response plus content-addressed CUR2, pricing, compatibility, workload, and license authorities. |
+| Money/privacy | Exact integer micros and currency separation; no raw credentials or unbounded customer/provider text. |
+| Failure behavior | Missing authority/provider evidence stays configuration-required; failed/stale collection retains last accepted data and never becomes zero. |
+| External acceptance | Real AWS, multi-account/Region, and signed-in two-tenant evidence remains `PENDING_EXTERNAL_ACCEPTANCE`; no live claim will be made. |
+
+### Ordered verification and promotion plan
+
+1. Run the focused domain, vertical, runtime, provider-route, shared-registration,
+   permission, migration, and UI/render tests.
+2. Run root/collector typechecks and builds, affected ESLint, secret scan,
+   CloudFormation lint, PostgreSQL migration checks, and `git diff --check`.
+3. If all local gates pass, update this record, the authoritative tracker, and
+   the CloudAware AWS implementation ledger, then save and push the checkpoint
+   to `develop` and inspect the exact standing-PR CI run.
+
+### Candidate verification record
+
+All commands ran on Node `v22.23.2` against implementation baseline
+`2e9b8a7d76a91e711d79e9a0c739d278fb2c2c1c` on 2026-08-21.
+
+| Gate | Exact command / result |
+|---|---|
+| Focused domain/runtime/UI | `node --experimental-strip-types --test --test-concurrency=1` over the five Graviton definition, engine, vertical, binding, and trend suites — **36 passed, 0 failed, 0 skipped**. |
+| Durable runtime/shared handler | Production runtime, shared closure, and background-handler suites — **13 passed, 0 failed, 0 skipped**. |
+| Collector provider route | Collector build plus `dist/test/graviton-savings-provider-route.test.js` — **4 passed, 0 failed, 0 skipped**. |
+| Permission/predecessor/schema contracts | AWS template, `.8.11` predecessor, successor catalog/repository, and schema-parity suites — **12 passed, 0 failed, 1 environment-only PostgreSQL catalog test skipped**; the skipped case was then exercised successfully by the real PostgreSQL run below. |
+| PostgreSQL migrations/runtime roles | `scripts/test-postgres.mjs` from an isolated `/Users/Shared` copy because Docker Desktop cannot mount `~/Documents` — **130 migrations applied; 13 passed, 0 failed, 0 skipped** across all emitted TAP suites. |
+| Root/collector typecheck | `pnpm typecheck`; `pnpm typecheck:collector` — **passed**. |
+| Root/collector build | `pnpm build`; collector `pnpm run build` — **passed**. |
+| Affected ESLint | `pnpm exec eslint` over all Graviton app/lib/db/collector/test files — **passed**. |
+| Secret scan | `pnpm security:secrets` — **passed for 2,652 source files**. |
+| CloudFormation | Recorded venv `cfn-lint` plus `pnpm lint:cloudformation` — **28 templates passed; 42 documented Bedrock catalog false positives suppressed**. |
+| Diff integrity | `git diff --check` — **passed** before promotion; rerun after final documentation edits. |
+
+### Handoff and promotion
+
+| Field | Value |
+|---|---|
+| Feature implementation | `43c625d` (already landed and remote); verified at baseline `2e9b8a7` |
+| Evidence file updated | This record |
+| Tracker maturity | `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE` |
+| Execution ledger | `docs/CLOUDAWARE_AWS_IMPLEMENTATION_LEDGER.md` |
+| Controlled provider/live evidence | `PENDING_EXTERNAL_ACCEPTANCE` |
+| Next dependency-safe slice | Canonical AWS catalog and Navigator foundation |
