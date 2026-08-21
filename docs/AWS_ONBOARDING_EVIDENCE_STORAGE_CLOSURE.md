@@ -96,5 +96,5 @@ the template tests and cfn-lint still require the exact CMK encryption wiring.
 | CloudFormation lint and infrastructure contracts | All 28 templates passed cfn-lint with 42 existing documented Bedrock catalog suppressions; EC2 operations validation and isolated Compose/Caddy/Tunnel runtime verification passed. Trivy is unavailable locally; the existing rule-specific `AWS-0132` false-positive record now includes the exact single-node CMK intrinsic and CI remains authoritative for the scan. |
 | Typecheck, lint, secret scan, build/render | Root and collector typechecks passed; affected and full ESLint passed; secret scan passed for 2,669 files; production build and 4/4 rendered-route checks passed. |
 | Migration diff | Passed / not applicable; no schema, migration, registry, or migrator changed. |
-| Feature commit / exact CI | Pending |
+| Feature commit / exact CI | `f5da93dd318295701722c3f72ed133df6fa35a25`; [CI run 32476012087](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32476012087) and [Kubernetes/supply-chain run 32476012146](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32476012146) passed for that exact SHA. |
 | External rollout | Pending explicit authorization; no live infrastructure change in this checkpoint |
