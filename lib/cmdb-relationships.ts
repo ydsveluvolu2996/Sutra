@@ -30,6 +30,9 @@ import type { JsonValue, PilotResource } from "./pilot-types.ts";
 export type DerivedRelationshipType =
   | "contained-in-vpc"
   | "contained-in-subnet"
+  | "contained-in-route-table"
+  | "contained-in-network-acl"
+  | "contained-in-internet-gateway"
   | "spans-subnet"
   | "uses-security-group"
   | "allows-from-security-group"
@@ -310,16 +313,46 @@ export function deriveRelationships(resources: readonly PilotResource[]): Relati
         }
         break;
       }
+      case "ec2.route": {
+        push(key, str(config.routeTableId), "contained-in-route-table", "routeTableId", "depends-on");
+        push(key, str(config.target), "routes-through-gateway", "target", "depends-on");
+        break;
+      }
+      case "ec2.route-table-association": {
+        push(key, str(config.routeTableId), "contained-in-route-table", "routeTableId", "depends-on");
+        push(key, str(config.subnetId), "associates-subnet", "subnetId", "depends-on");
+        push(key, str(config.gatewayId), "associated-with", "gatewayId", "depends-on");
+        break;
+      }
       case "ec2.network-acl": {
         for (const subnetId of strArray(config.associatedSubnetIds)) {
           push(key, subnetId, "associates-subnet", "associatedSubnetIds", "depended-on-by");
         }
         break;
       }
+      case "ec2.network-acl-entry": {
+        push(key, str(config.networkAclId), "contained-in-network-acl", "networkAclId", "depends-on");
+        break;
+      }
+      case "ec2.network-acl-association": {
+        push(key, str(config.networkAclId), "contained-in-network-acl", "networkAclId", "depends-on");
+        push(key, str(config.subnetId), "associates-subnet", "subnetId", "depends-on");
+        break;
+      }
       case "ec2.internet-gateway": {
         for (const vpcId of strArray(config.attachedVpcIds)) {
           push(key, vpcId, "attached-to-vpc", "attachedVpcIds", "depends-on");
         }
+        break;
+      }
+      case "ec2.internet-gateway-attachment": {
+        push(
+          key,
+          str(config.internetGatewayId),
+          "contained-in-internet-gateway",
+          "internetGatewayId",
+          "depends-on",
+        );
         break;
       }
       case "rds.db-instance": {

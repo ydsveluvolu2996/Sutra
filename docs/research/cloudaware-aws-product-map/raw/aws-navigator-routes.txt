@@ -1,0 +1,151 @@
+# CloudAware AWS Navigator routes
+
+## AI & Machine Learning
+Bedrock | /cmdb/navigator/aws-bedrock
+Comprehend | /cmdb/navigator/aws-comprehend
+Kendra | /cmdb/navigator/aws-kendra
+Lex v2 | /cmdb/navigator/aws-lexv2
+Polly | /cmdb/navigator/aws-polly
+Rekognition | /cmdb/navigator/aws-rekognition
+SageMaker | /cmdb/navigator/aws-sagemaker
+Textract | /cmdb/navigator/aws-textract
+Transcribe | /cmdb/navigator/aws-transcribe
+
+## Analytics
+Athena | /cmdb/navigator/aws-athena
+CloudSearch | /cmdb/navigator/aws-cloud-search
+Data Pipeline | /cmdb/navigator/aws-data-pipeline
+EMR | /cmdb/navigator/aws-emr
+Glue | /cmdb/navigator/aws-glue
+Kinesis | /cmdb/navigator/aws-kinesis
+MSK | /cmdb/navigator/aws-msk
+OpenSearch | /cmdb/navigator/aws-opensearch
+QuickSight | /cmdb/navigator/aws-quicksight
+
+## Application Integration
+MQ | /cmdb/navigator/aws-mq
+MWAA | /cmdb/navigator/aws-mwaa
+SNS | /cmdb/navigator/aws-sns
+SQS | /cmdb/navigator/aws-sqs
+SWF | /cmdb/navigator/aws-swf
+Step Functions | /cmdb/navigator/aws-step-functions
+
+## Blockchain
+Managed Blockchain | /cmdb/navigator/aws-managed-blockchain
+
+## Business Applications
+Connect | /cmdb/navigator/aws-connect
+Connect Customer Profiles | /cmdb/navigator/aws-connect-customer-profiles
+Connect Outbound Campaigns | /cmdb/navigator/amazon-connect-outbound-campaigns
+
+## Compute
+Batch | /cmdb/navigator/aws-batch
+EC2 | /cmdb/navigator/aws-ec2
+ECR | /cmdb/navigator/aws-ecr
+ECS | /cmdb/navigator/aws-ecs
+EKS | /cmdb/navigator/aws-eks
+Elastic Beanstalk | /cmdb/navigator/aws-elastic-beanstalk
+Lambda | /cmdb/navigator/aws-lambda
+Lightsail | /cmdb/navigator/aws-lightsail
+
+## Cost Management
+Budgets | /cmdb/navigator/aws-budgets
+Cost Explorer | /cmdb/navigator/aws-cost-explorer
+Savings Plans | /cmdb/navigator/aws-savings-plans
+
+## Customer Engagement
+SES | /cmdb/navigator/aws-ses
+
+## Database
+DAX | /cmdb/navigator/aws-dax
+DynamoDB | /cmdb/navigator/aws-dynamo-db
+DynamoDB Streams | /cmdb/navigator/aws-dynamo-db-streams
+ElastiCache | /cmdb/navigator/aws-elasti-cache
+RDS | /cmdb/navigator/aws-rds
+Redshift | /cmdb/navigator/aws-redshift
+
+## Developer Tools
+CodeBuild | /cmdb/navigator/aws-code-build
+CodeCommit | /cmdb/navigator/aws-code-commit
+CodeDeploy | /cmdb/navigator/aws-code-deploy
+CodePipeline | /cmdb/navigator/aws-code-pipeline
+X-Ray | /cmdb/navigator/aws-xray
+
+## End User Computing
+AppStream | /cmdb/navigator/aws-app-stream
+WorkSpaces | /cmdb/navigator/aws-work-spaces
+WorkSpaces Instances | /cmdb/navigator/aws-workspaces-instances
+
+## Internet of Things
+IoT Core | /cmdb/navigator/aws-iot-core
+
+## Management & Governance
+Application Auto Scaling | /cmdb/navigator/aws-application-auto-scaling
+Auto Scaling | /cmdb/navigator/aws-auto-scaling
+CloudFormation | /cmdb/navigator/aws-cloud-formation
+CloudTrail | /cmdb/navigator/aws-cloud-trail
+CloudWatch | /cmdb/navigator/aws-cloud-watch
+CloudWatch Logs | /cmdb/navigator/aws-cloud-watch-logs
+Compute Optimizer | /cmdb/navigator/aws-compute-optimizer
+Config | /cmdb/navigator/aws-config
+EventBridge | /cmdb/navigator/aws-event-bridge
+License Manager | /cmdb/navigator/aws-license-manager
+OpsWorks | /cmdb/navigator/aws-ops-works
+SSM | /cmdb/navigator/aws-ssm
+Service Catalog | /cmdb/navigator/aws-service-catalog
+Well-Architected Tool | /cmdb/navigator/aws-well-architected-tool
+
+## Media Services
+MediaConnect | /cmdb/navigator/aws-media-connect
+MediaConvert | /cmdb/navigator/aws-media-convert
+MediaLive | /cmdb/navigator/aws-media-live
+MediaPackage | /cmdb/navigator/aws-media-package
+MediaStore | /cmdb/navigator/aws-media-store
+MediaTailor | /cmdb/navigator/aws-media-tailor
+
+## Migration & Transfer
+DMS | /cmdb/navigator/aws-dms
+Data Sync | /cmdb/navigator/aws-data-sync
+Snowball | /cmdb/navigator/aws-snowball
+
+## Networking & Content Delivery
+API Gateway | /cmdb/navigator/aws-api-gateway
+App Mesh | /cmdb/navigator/aws-app-mesh
+Cloud Map | /cmdb/navigator/aws-cloud-map
+Cloud WAN | /cmdb/navigator/aws-cloud-wan
+CloudFront | /cmdb/navigator/aws-cloud-front
+Direct Connect | /cmdb/navigator/aws-direct-connect
+ELB | /cmdb/navigator/aws-elb
+Global Accelerator | /cmdb/navigator/aws-global-accelerator
+IPAM | /cmdb/navigator/aws-ipam
+Network Firewall | /cmdb/navigator/aws-network-firewall
+Route 53 | /cmdb/navigator/aws-route53
+VPC | /cmdb/navigator/aws-vpc
+Verified Access | /cmdb/navigator/aws-verified-access
+
+## Security, Identity, Compliance
+Certificate Manager | /cmdb/navigator/aws-certificate-manager
+CloudHSM | /cmdb/navigator/aws-cloud-hsm
+Cognito | /cmdb/navigator/aws-cognito
+Directory Service | /cmdb/navigator/aws-directory-service
+Firewall Manager | /cmdb/navigator/aws-firewall-manager
+GuardDuty | /cmdb/navigator/aws-guard-duty
+IAM | /cmdb/navigator/aws-iam
+IAM ID Center | /cmdb/navigator/aws-iam-identity-center
+Inspector | /cmdb/navigator/aws-inspector2
+KMS | /cmdb/navigator/aws-kms
+Organizations | /cmdb/navigator/aws-organizations
+Resource Access Manager | /cmdb/navigator/aws-ram
+Secrets Manager | /cmdb/navigator/aws-secrets-manager
+Security Hub | /cmdb/navigator/aws-security-hub
+Security Lake | /cmdb/navigator/aws-security-lake
+Shield | /cmdb/navigator/aws-shield
+WAF | /cmdb/navigator/aws-waf
+
+## Storage
+Backup | /cmdb/navigator/aws-backup
+EFS | /cmdb/navigator/aws-efs
+FSx | /cmdb/navigator/aws-fsx
+Glacier | /cmdb/navigator/aws-glacier
+S3 | /cmdb/navigator/aws-s3
+Storage Gateway | /cmdb/navigator/aws-storage-gateway

@@ -3783,10 +3783,22 @@ function liveRelationships(
     const subnetId = scalarString(config.subnetId);
     const instanceId = scalarString(config.instanceId);
     const kmsKeyId = scalarString(config.kmsKeyId);
+    const routeTableId = scalarString(config.routeTableId);
+    const networkAclId = scalarString(config.networkAclId);
+    const internetGatewayId = scalarString(config.internetGatewayId);
+    const routeTarget = scalarString(config.target);
+    const gatewayId = scalarString(config.gatewayId);
     if (vpcId !== null) link(resource, vpcId, "contained_by", "vpcId");
     if (subnetId !== null) link(resource, subnetId, "runs_in", "subnetId");
     if (instanceId !== null) link(resource, instanceId, "attached_to", "instanceId");
     if (kmsKeyId !== null) link(resource, kmsKeyId, "encrypted_by", "kmsKeyId");
+    if (routeTableId !== null) link(resource, routeTableId, "contained_by", "routeTableId");
+    if (networkAclId !== null) link(resource, networkAclId, "contained_by", "networkAclId");
+    if (internetGatewayId !== null) {
+      link(resource, internetGatewayId, "contained_by", "internetGatewayId");
+    }
+    if (routeTarget !== null) link(resource, routeTarget, "routes_through", "target");
+    if (gatewayId !== null) link(resource, gatewayId, "associated_with", "gatewayId");
     for (const relatedSubnetId of stringArray(config.subnetIds)) {
       link(resource, relatedSubnetId, "runs_in", "subnetIds");
     }

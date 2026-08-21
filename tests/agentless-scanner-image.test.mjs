@@ -38,6 +38,12 @@ test("agentless scanner builds versioned Trivy from an immutable patched module 
       "h1:Rw8j/hFzGvJUZwNBXnAtf5sVDVt+65SK2C7IxCxZt5o=",
     ),
   );
+  assert.ok(dockerfile.includes("golang.org/x/mod@v0.40.0"));
+  assert.ok(
+    dockerfile.includes(
+      "h1:hUv+3cXcdRHz08UmSiOob7sadHig73uo5bkXxQ/tvUs=",
+    ),
+  );
   assert.ok(dockerfile.includes("oras.land/oras-go/v2@v2.6.2"));
   assert.ok(
     dockerfile.includes(
@@ -51,7 +57,7 @@ test("agentless scanner builds versioned Trivy from an immutable patched module 
   );
   assert.ok(
     dockerfile.includes(
-      "github.com/aquasecurity/trivy/pkg/version/app.ver=0.72.0-sutra.1",
+      "github.com/aquasecurity/trivy/pkg/version/app.ver=0.72.0-sutra.2",
     ),
   );
   assert.equal(dockerfile.includes("9321f90278433af7504a258597101e65433fad75"), false);

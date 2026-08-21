@@ -13,6 +13,8 @@ Metadata:
         Parameters: [AmiId, InstanceType, RootVolumeGiB, EnableMaximumRuntimeStop, MaximumRuntimeHours, EnableDailyAutoStop, DailyStopSchedule, DailyStopTimezone]
       - Label: { default: Sutra deployment }
         Parameters: [SutraAppImage, SutraDomain]
+      - Label: { default: Immutable evidence storage }
+        Parameters: [EvidenceRetentionDays]
       - Label: { default: Cloudflare Tunnel }
         Parameters: [CloudflareTunnelCredentialsParameterName]
       - Label: { default: Notification delivery (inert until deliberately enabled) }
@@ -87,6 +89,15 @@ Parameters:
     Type: String
     Default: sutracmdb.com
     AllowedPattern: "^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\\.)+[A-Za-z]{2,63}$"
+  EvidenceRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 30
+    MaxValue: 3650
+    Description: >-
+      Retention for encrypted collector evidence objects. Lifecycle expiration
+      is independent of CMDB projection retention and never grants the runtime
+      delete permission.
   CloudflareTunnelCredentialsParameterName:
     Type: String
     Default: /sutra/production/cloudflare-tunnel-credentials
@@ -121,6 +132,119 @@ Conditions:
           - ""
 
 Resources:
+  EvidenceKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Sutra private-beta immutable collector evidence
+      EnableKeyRotation: true
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+      PendingWindowInDays: 30
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountAdministrationThroughIam
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+      Tags:
+        - { Key: "sutra:component", Value: evidence }
+        - { Key: "sutra:environment", Value: private-beta }
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID:
+                Fn::GetAtt: [EvidenceKey, Arn]
+            BucketKeyEnabled: true
+      VersioningConfiguration: { Status: Enabled }
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: AbortIncompleteMultipartUploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 }
+          - Id: DeleteExpiredEvidenceVersions
+            Status: Enabled
+            Prefix: evidence/v1/
+            NoncurrentVersionExpiration: { NoncurrentDays: 1 }
+          - Id: ExpireEvidenceAfterRetention
+            Status: Enabled
+            Prefix: evidence/v1/
+            ExpirationInDays: { Ref: EvidenceRetentionDays }
+      Tags:
+        - { Key: "sutra:component", Value: evidence }
+        - { Key: "sutra:environment", Value: private-beta }
+
+  EvidenceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: { Ref: EvidenceBucket }
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyUnencryptedTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - Fn::GetAtt: [EvidenceBucket, Arn]
+              - Fn::Sub: ${EvidenceBucket.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: "false"
+          - Sid: DenyUploadsWithoutKms
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource:
+              Fn::Sub: ${EvidenceBucket.Arn}/*
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+          - Sid: DenyEvidenceEncryptedWithUnexpectedKey
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource:
+              Fn::Sub: ${EvidenceBucket.Arn}/evidence/v1/*
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption-aws-kms-key-id:
+                  Fn::GetAtt: [EvidenceKey, Arn]
+
+  EvidenceRuntimeConfigParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: /sutra/private-beta/evidence-config
+      Type: String
+      Tier: Standard
+      Description: Non-secret managed evidence runtime descriptor
+      Value:
+        Fn::Sub: >-
+          {"backend":"s3","bucket":"${EvidenceBucket}","kmsKeyArn":"${EvidenceKey.Arn}","retentionDays":${EvidenceRetentionDays}}
+      Tags:
+        "sutra:component": evidence
+        "sutra:environment": private-beta
+
   # This is an egress-only host with no inbound rules. Its six explicit,
   # port-bounded destinations must reach dynamic AWS, Cloudflare, DNS and
   # signed package endpoints; fixed destination CIDRs are not available. The
@@ -225,6 +349,39 @@ Resources:
                 Resource:
                   - Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/sutra/app
                   - Fn::Sub: arn:${AWS::Partition}:ecr:${AWS::Region}:${AWS::AccountId}:repository/sutra/notification-worker
+        - PolicyName: ReadWriteOnlyOpaqueManagedEvidence
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadAndCreateImmutableEvidenceObjects
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: ${EvidenceBucket.Arn}/evidence/v1/*
+              - Sid: UsePrivateBetaKeyOnlyThroughEvidenceS3
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                Resource:
+                  Fn::GetAtt: [EvidenceKey, Arn]
+                Condition:
+                  StringEquals:
+                    kms:ViaService:
+                      Fn::Sub: s3.${AWS::Region}.amazonaws.com
+        - PolicyName: ReadOnlyExactEvidenceRuntimeConfig
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadExactEvidenceRuntimeDescriptor
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/sutra/private-beta/evidence-config
         - PolicyName: ReadOnlyNotificationDestinationSecrets
           PolicyDocument:
             Version: "2012-10-17"
@@ -351,6 +508,7 @@ Resources:
   # trivy:ignore:AWS-0028
   SutraInstance:
     Type: AWS::EC2::Instance
+    DependsOn: EvidenceRuntimeConfigParameter
     Properties:
       ImageId: { Ref: AmiId }
       InstanceType: { Ref: InstanceType }
@@ -442,6 +600,7 @@ Resources:
               test -f "$RELEASE_STAGE/deploy/ec2/compose.prod.yaml"
               test -f "$RELEASE_STAGE/deploy/ec2/bootstrap.sh"
               test -f "$RELEASE_STAGE/deploy/ec2/release-update.sh"
+              test -f "$RELEASE_STAGE/deploy/ec2/sync-evidence-runtime.sh"
               test -f "$RELEASE_STAGE/docker/postgres-init.sh"
 
               install -d -m 0755 /opt/sutra/deploy /opt/sutra/docker
@@ -584,6 +743,16 @@ Outputs:
       reserved /sutra/ IAM path.
     Value:
       Fn::GetAtt: [InstanceRole, Arn]
+  EvidenceBucketName:
+    Description: Private retained bucket for immutable encrypted collector evidence.
+    Value: { Ref: EvidenceBucket }
+  EvidenceKmsKeyArn:
+    Description: Customer-managed key used only for private-beta collector evidence.
+    Value:
+      Fn::GetAtt: [EvidenceKey, Arn]
+  EvidenceRetention:
+    Description: Current evidence-object lifecycle retention in days.
+    Value: { Ref: EvidenceRetentionDays }
   Administration:
     Value:
       Fn::Sub: aws ssm start-session --target ${SutraInstance} --region ${AWS::Region}

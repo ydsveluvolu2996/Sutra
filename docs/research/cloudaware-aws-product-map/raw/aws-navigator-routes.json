@@ -1,0 +1,566 @@
+{
+  "AI & Machine Learning": [
+    {
+      "name": "AI & Machine Learning",
+      "route": "/cmdb/navigator/aws.ai-and-machine-learning"
+    },
+    {
+      "name": "Bedrock",
+      "route": "/cmdb/navigator/aws-bedrock"
+    },
+    {
+      "name": "Comprehend",
+      "route": "/cmdb/navigator/aws-comprehend"
+    },
+    {
+      "name": "Kendra",
+      "route": "/cmdb/navigator/aws-kendra"
+    },
+    {
+      "name": "Lex v2",
+      "route": "/cmdb/navigator/aws-lexv2"
+    },
+    {
+      "name": "Polly",
+      "route": "/cmdb/navigator/aws-polly"
+    },
+    {
+      "name": "Rekognition",
+      "route": "/cmdb/navigator/aws-rekognition"
+    },
+    {
+      "name": "SageMaker",
+      "route": "/cmdb/navigator/aws-sagemaker"
+    },
+    {
+      "name": "Textract",
+      "route": "/cmdb/navigator/aws-textract"
+    },
+    {
+      "name": "Transcribe",
+      "route": "/cmdb/navigator/aws-transcribe"
+    }
+  ],
+  "Analytics": [
+    {
+      "name": "Analytics",
+      "route": "/cmdb/navigator/aws.analytics"
+    },
+    {
+      "name": "Athena",
+      "route": "/cmdb/navigator/aws-athena"
+    },
+    {
+      "name": "CloudSearch",
+      "route": "/cmdb/navigator/aws-cloud-search"
+    },
+    {
+      "name": "Data Pipeline",
+      "route": "/cmdb/navigator/aws-data-pipeline"
+    },
+    {
+      "name": "EMR",
+      "route": "/cmdb/navigator/aws-emr"
+    },
+    {
+      "name": "Glue",
+      "route": "/cmdb/navigator/aws-glue"
+    },
+    {
+      "name": "Kinesis",
+      "route": "/cmdb/navigator/aws-kinesis"
+    },
+    {
+      "name": "MSK",
+      "route": "/cmdb/navigator/aws-msk"
+    },
+    {
+      "name": "OpenSearch",
+      "route": "/cmdb/navigator/aws-opensearch"
+    },
+    {
+      "name": "QuickSight",
+      "route": "/cmdb/navigator/aws-quicksight"
+    }
+  ],
+  "Application Integration": [
+    {
+      "name": "Application Integration",
+      "route": "/cmdb/navigator/aws.application-integration"
+    },
+    {
+      "name": "MQ",
+      "route": "/cmdb/navigator/aws-mq"
+    },
+    {
+      "name": "MWAA",
+      "route": "/cmdb/navigator/aws-mwaa"
+    },
+    {
+      "name": "SNS",
+      "route": "/cmdb/navigator/aws-sns"
+    },
+    {
+      "name": "SQS",
+      "route": "/cmdb/navigator/aws-sqs"
+    },
+    {
+      "name": "SWF",
+      "route": "/cmdb/navigator/aws-swf"
+    },
+    {
+      "name": "Step Functions",
+      "route": "/cmdb/navigator/aws-step-functions"
+    }
+  ],
+  "Blockchain": [
+    {
+      "name": "Blockchain",
+      "route": "/cmdb/navigator/aws.blockchain"
+    },
+    {
+      "name": "Managed Blockchain",
+      "route": "/cmdb/navigator/aws-managed-blockchain"
+    }
+  ],
+  "Business Applications": [
+    {
+      "name": "Business Applications",
+      "route": "/cmdb/navigator/aws.business-applications"
+    },
+    {
+      "name": "Connect",
+      "route": "/cmdb/navigator/aws-connect"
+    },
+    {
+      "name": "Connect Customer Profiles",
+      "route": "/cmdb/navigator/aws-connect-customer-profiles"
+    },
+    {
+      "name": "Connect Outbound Campaigns",
+      "route": "/cmdb/navigator/amazon-connect-outbound-campaigns"
+    }
+  ],
+  "Compute": [
+    {
+      "name": "Compute",
+      "route": "/cmdb/navigator/aws.compute"
+    },
+    {
+      "name": "Batch",
+      "route": "/cmdb/navigator/aws-batch"
+    },
+    {
+      "name": "EC2",
+      "route": "/cmdb/navigator/aws-ec2"
+    },
+    {
+      "name": "ECR",
+      "route": "/cmdb/navigator/aws-ecr"
+    },
+    {
+      "name": "ECS",
+      "route": "/cmdb/navigator/aws-ecs"
+    },
+    {
+      "name": "EKS",
+      "route": "/cmdb/navigator/aws-eks"
+    },
+    {
+      "name": "Elastic Beanstalk",
+      "route": "/cmdb/navigator/aws-elastic-beanstalk"
+    },
+    {
+      "name": "Lambda",
+      "route": "/cmdb/navigator/aws-lambda"
+    },
+    {
+      "name": "Lightsail",
+      "route": "/cmdb/navigator/aws-lightsail"
+    }
+  ],
+  "Cost Management": [
+    {
+      "name": "Cost Management",
+      "route": "/cmdb/navigator/aws.cost-management"
+    },
+    {
+      "name": "Budgets",
+      "route": "/cmdb/navigator/aws-budgets"
+    },
+    {
+      "name": "Cost Explorer",
+      "route": "/cmdb/navigator/aws-cost-explorer"
+    },
+    {
+      "name": "Savings Plans",
+      "route": "/cmdb/navigator/aws-savings-plans"
+    }
+  ],
+  "Customer Engagement": [
+    {
+      "name": "Customer Engagement",
+      "route": "/cmdb/navigator/aws.customer-engagement"
+    },
+    {
+      "name": "SES",
+      "route": "/cmdb/navigator/aws-ses"
+    }
+  ],
+  "Database": [
+    {
+      "name": "Database",
+      "route": "/cmdb/navigator/aws.database"
+    },
+    {
+      "name": "DAX",
+      "route": "/cmdb/navigator/aws-dax"
+    },
+    {
+      "name": "DynamoDB",
+      "route": "/cmdb/navigator/aws-dynamo-db"
+    },
+    {
+      "name": "DynamoDB Streams",
+      "route": "/cmdb/navigator/aws-dynamo-db-streams"
+    },
+    {
+      "name": "ElastiCache",
+      "route": "/cmdb/navigator/aws-elasti-cache"
+    },
+    {
+      "name": "RDS",
+      "route": "/cmdb/navigator/aws-rds"
+    },
+    {
+      "name": "Redshift",
+      "route": "/cmdb/navigator/aws-redshift"
+    }
+  ],
+  "Developer Tools": [
+    {
+      "name": "Developer Tools",
+      "route": "/cmdb/navigator/aws.developer-tools"
+    },
+    {
+      "name": "CodeBuild",
+      "route": "/cmdb/navigator/aws-code-build"
+    },
+    {
+      "name": "CodeCommit",
+      "route": "/cmdb/navigator/aws-code-commit"
+    },
+    {
+      "name": "CodeDeploy",
+      "route": "/cmdb/navigator/aws-code-deploy"
+    },
+    {
+      "name": "CodePipeline",
+      "route": "/cmdb/navigator/aws-code-pipeline"
+    },
+    {
+      "name": "X-Ray",
+      "route": "/cmdb/navigator/aws-xray"
+    }
+  ],
+  "End User Computing": [
+    {
+      "name": "End User Computing",
+      "route": "/cmdb/navigator/aws.end-user-computing"
+    },
+    {
+      "name": "AppStream",
+      "route": "/cmdb/navigator/aws-app-stream"
+    },
+    {
+      "name": "WorkSpaces",
+      "route": "/cmdb/navigator/aws-work-spaces"
+    },
+    {
+      "name": "WorkSpaces Instances",
+      "route": "/cmdb/navigator/aws-workspaces-instances"
+    }
+  ],
+  "Internet of Things": [
+    {
+      "name": "Internet of Things",
+      "route": "/cmdb/navigator/aws.internet-of-things"
+    },
+    {
+      "name": "IoT Core",
+      "route": "/cmdb/navigator/aws-iot-core"
+    }
+  ],
+  "Management & Governance": [
+    {
+      "name": "Management & Governance",
+      "route": "/cmdb/navigator/aws.management-and-governance"
+    },
+    {
+      "name": "Application Auto Scaling",
+      "route": "/cmdb/navigator/aws-application-auto-scaling"
+    },
+    {
+      "name": "Auto Scaling",
+      "route": "/cmdb/navigator/aws-auto-scaling"
+    },
+    {
+      "name": "CloudFormation",
+      "route": "/cmdb/navigator/aws-cloud-formation"
+    },
+    {
+      "name": "CloudTrail",
+      "route": "/cmdb/navigator/aws-cloud-trail"
+    },
+    {
+      "name": "CloudWatch",
+      "route": "/cmdb/navigator/aws-cloud-watch"
+    },
+    {
+      "name": "CloudWatch Logs",
+      "route": "/cmdb/navigator/aws-cloud-watch-logs"
+    },
+    {
+      "name": "Compute Optimizer",
+      "route": "/cmdb/navigator/aws-compute-optimizer"
+    },
+    {
+      "name": "Config",
+      "route": "/cmdb/navigator/aws-config"
+    },
+    {
+      "name": "EventBridge",
+      "route": "/cmdb/navigator/aws-event-bridge"
+    },
+    {
+      "name": "License Manager",
+      "route": "/cmdb/navigator/aws-license-manager"
+    },
+    {
+      "name": "OpsWorks",
+      "route": "/cmdb/navigator/aws-ops-works"
+    },
+    {
+      "name": "SSM",
+      "route": "/cmdb/navigator/aws-ssm"
+    },
+    {
+      "name": "Service Catalog",
+      "route": "/cmdb/navigator/aws-service-catalog"
+    },
+    {
+      "name": "Well-Architected Tool",
+      "route": "/cmdb/navigator/aws-well-architected-tool"
+    }
+  ],
+  "Media Services": [
+    {
+      "name": "Media Services",
+      "route": "/cmdb/navigator/aws.media-services"
+    },
+    {
+      "name": "MediaConnect",
+      "route": "/cmdb/navigator/aws-media-connect"
+    },
+    {
+      "name": "MediaConvert",
+      "route": "/cmdb/navigator/aws-media-convert"
+    },
+    {
+      "name": "MediaLive",
+      "route": "/cmdb/navigator/aws-media-live"
+    },
+    {
+      "name": "MediaPackage",
+      "route": "/cmdb/navigator/aws-media-package"
+    },
+    {
+      "name": "MediaStore",
+      "route": "/cmdb/navigator/aws-media-store"
+    },
+    {
+      "name": "MediaTailor",
+      "route": "/cmdb/navigator/aws-media-tailor"
+    }
+  ],
+  "Migration & Transfer": [
+    {
+      "name": "Migration & Transfer",
+      "route": "/cmdb/navigator/aws.migration-and-transfer"
+    },
+    {
+      "name": "DMS",
+      "route": "/cmdb/navigator/aws-dms"
+    },
+    {
+      "name": "Data Sync",
+      "route": "/cmdb/navigator/aws-data-sync"
+    },
+    {
+      "name": "Snowball",
+      "route": "/cmdb/navigator/aws-snowball"
+    }
+  ],
+  "Networking & Content Delivery": [
+    {
+      "name": "Networking & Content Delivery",
+      "route": "/cmdb/navigator/aws.networking-and-content-delivery"
+    },
+    {
+      "name": "API Gateway",
+      "route": "/cmdb/navigator/aws-api-gateway"
+    },
+    {
+      "name": "App Mesh",
+      "route": "/cmdb/navigator/aws-app-mesh"
+    },
+    {
+      "name": "Cloud Map",
+      "route": "/cmdb/navigator/aws-cloud-map"
+    },
+    {
+      "name": "Cloud WAN",
+      "route": "/cmdb/navigator/aws-cloud-wan"
+    },
+    {
+      "name": "CloudFront",
+      "route": "/cmdb/navigator/aws-cloud-front"
+    },
+    {
+      "name": "Direct Connect",
+      "route": "/cmdb/navigator/aws-direct-connect"
+    },
+    {
+      "name": "ELB",
+      "route": "/cmdb/navigator/aws-elb"
+    },
+    {
+      "name": "Global Accelerator",
+      "route": "/cmdb/navigator/aws-global-accelerator"
+    },
+    {
+      "name": "IPAM",
+      "route": "/cmdb/navigator/aws-ipam"
+    },
+    {
+      "name": "Network Firewall",
+      "route": "/cmdb/navigator/aws-network-firewall"
+    },
+    {
+      "name": "Route 53",
+      "route": "/cmdb/navigator/aws-route53"
+    },
+    {
+      "name": "VPC",
+      "route": "/cmdb/navigator/aws-vpc"
+    },
+    {
+      "name": "Verified Access",
+      "route": "/cmdb/navigator/aws-verified-access"
+    }
+  ],
+  "Security, Identity, Compliance": [
+    {
+      "name": "Security, Identity, Compliance",
+      "route": "/cmdb/navigator/aws.security-identity-compliance"
+    },
+    {
+      "name": "Certificate Manager",
+      "route": "/cmdb/navigator/aws-certificate-manager"
+    },
+    {
+      "name": "CloudHSM",
+      "route": "/cmdb/navigator/aws-cloud-hsm"
+    },
+    {
+      "name": "Cognito",
+      "route": "/cmdb/navigator/aws-cognito"
+    },
+    {
+      "name": "Directory Service",
+      "route": "/cmdb/navigator/aws-directory-service"
+    },
+    {
+      "name": "Firewall Manager",
+      "route": "/cmdb/navigator/aws-firewall-manager"
+    },
+    {
+      "name": "GuardDuty",
+      "route": "/cmdb/navigator/aws-guard-duty"
+    },
+    {
+      "name": "IAM",
+      "route": "/cmdb/navigator/aws-iam"
+    },
+    {
+      "name": "IAM ID Center",
+      "route": "/cmdb/navigator/aws-iam-identity-center"
+    },
+    {
+      "name": "Inspector",
+      "route": "/cmdb/navigator/aws-inspector2"
+    },
+    {
+      "name": "KMS",
+      "route": "/cmdb/navigator/aws-kms"
+    },
+    {
+      "name": "Organizations",
+      "route": "/cmdb/navigator/aws-organizations"
+    },
+    {
+      "name": "Resource Access Manager",
+      "route": "/cmdb/navigator/aws-ram"
+    },
+    {
+      "name": "Secrets Manager",
+      "route": "/cmdb/navigator/aws-secrets-manager"
+    },
+    {
+      "name": "Security Hub",
+      "route": "/cmdb/navigator/aws-security-hub"
+    },
+    {
+      "name": "Security Lake",
+      "route": "/cmdb/navigator/aws-security-lake"
+    },
+    {
+      "name": "Shield",
+      "route": "/cmdb/navigator/aws-shield"
+    },
+    {
+      "name": "WAF",
+      "route": "/cmdb/navigator/aws-waf"
+    }
+  ],
+  "Storage": [
+    {
+      "name": "Storage",
+      "route": "/cmdb/navigator/aws.storage"
+    },
+    {
+      "name": "Backup",
+      "route": "/cmdb/navigator/aws-backup"
+    },
+    {
+      "name": "EFS",
+      "route": "/cmdb/navigator/aws-efs"
+    },
+    {
+      "name": "FSx",
+      "route": "/cmdb/navigator/aws-fsx"
+    },
+    {
+      "name": "Glacier",
+      "route": "/cmdb/navigator/aws-glacier"
+    },
+    {
+      "name": "S3",
+      "route": "/cmdb/navigator/aws-s3"
+    },
+    {
+      "name": "Storage Gateway",
+      "route": "/cmdb/navigator/aws-storage-gateway"
+    }
+  ]
+}

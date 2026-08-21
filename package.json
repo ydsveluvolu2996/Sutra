@@ -74,6 +74,8 @@
     "backup": "node scripts/backup.mjs",
     "registry:validate": "node scripts/validate-registry-scan.mjs",
     "registry:cve:validate": "node scripts/validate-registry-cve.mjs",
+    "catalog:aws:generate": "node scripts/generate-aws-cmdb-catalog.mjs",
+    "catalog:aws:check": "node scripts/generate-aws-cmdb-catalog.mjs --check",
     "zoho:publish-runtime": "node scripts/publish-zoho-runtime-secret.mjs",
     "build:agentless-scanner": "pnpm --dir services/agentless-scanner build"
   },

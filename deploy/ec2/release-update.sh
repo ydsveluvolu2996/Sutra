@@ -101,8 +101,7 @@ flock -n 9 || die "Another release update is already running."
 CURRENT_IMAGE="$(awk -F= '$1 == "SUTRA_APP_IMAGE" {sub(/^[^=]*=/, ""); print; exit}' "$ENV_EC2")"
 [[ "$CURRENT_IMAGE" =~ @sha256:[0-9a-f]{64}$ ]] || die "Current immutable image setting is invalid."
 if [[ "$CURRENT_IMAGE" == "$NEW_IMAGE" ]]; then
-  log "Requested digest is already selected; reapplying the current release."
-  exec "$ROOT/deploy/ec2/redeploy.sh"
+  log "Requested digest is already selected; revalidating it through the complete release transaction."
 fi
 
 log "Authenticating to the account-local release registry."
@@ -113,6 +112,7 @@ docker pull "$NEW_IMAGE" >/dev/null
 docker image inspect "$NEW_IMAGE" >/dev/null
 
 STAGE_ROOT="$(mktemp -d "$ROOT/.sutra/release-stage.XXXXXX")"
+RUNTIME_ENV_BACKUP="$STAGE_ROOT/docker.env.before-release"
 RELEASE_CONTAINER="$(docker create "$NEW_IMAGE")"
 SUTRA_DOMAIN="$(awk -F= '$1 == "SUTRA_DOMAIN" {sub(/^[^=]*=/, ""); print; exit}' "$ENV_EC2")"
 [[ "$SUTRA_DOMAIN" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$ ]] || \
@@ -274,6 +274,12 @@ verify_public_release() {
     fetch_public "$path" "$label" 3
   done
 
+  # A rendered login page is insufficient evidence that the runtime identity
+  # secret was refreshed. Verify the browser-visible provider list and the
+  # complete Google authorization start contract while rollback is still
+  # available. The verifier never follows the redirect or prints OAuth data.
+  bash "$ROOT/deploy/ec2/verify-public-auth.sh" "$PUBLIC_ORIGIN"
+
   # A 200 login shell is not enough: the page disables submission until this
   # public runtime contract proves that the selected image loaded the real
   # network widget rather than a stale/local bypass or invalid runtime
@@ -376,6 +382,10 @@ cleanup() {
         log "Prior host bundle is missing from $ROLLBACK_DIR; manual recovery is required."
       fi
     fi
+    if [[ -f "$RUNTIME_ENV_BACKUP" ]]; then
+      install -o 0 -g 0 -m 0600 "$RUNTIME_ENV_BACKUP" "$DOCKER_ENV"
+      log "Restored the protected pre-release identity and mail runtime."
+    fi
     if [[ -x "$ROOT/deploy/ec2/redeploy.sh" ]]; then
       if "$ROOT/deploy/ec2/redeploy.sh" >/dev/null 2>&1; then
         # The immediately prior bundle may predate explicit edge-process
@@ -408,7 +418,7 @@ RELEASE_CONTAINER=""
 for required in \
   compose.prod.yaml .env.ec2.example Caddyfile cloudflared-config.yml.example \
   maintenance/security.txt bootstrap.sh redeploy.sh release-update.sh \
-  sync-zoho-runtime.sh sutra.service; do
+  sync-evidence-runtime.sh sync-zoho-runtime.sh verify-public-auth.sh sutra.service; do
   [[ -f "$STAGE_ROOT/deploy/ec2/$required" ]] || die "Release bundle is missing deploy/ec2/$required."
 done
 [[ -f "$STAGE_ROOT/docker/postgres-init.sh" ]] || die "Release bundle is missing docker/postgres-init.sh."
@@ -416,7 +426,9 @@ bash -n \
   "$STAGE_ROOT/deploy/ec2/bootstrap.sh" \
   "$STAGE_ROOT/deploy/ec2/redeploy.sh" \
   "$STAGE_ROOT/deploy/ec2/release-update.sh" \
+  "$STAGE_ROOT/deploy/ec2/sync-evidence-runtime.sh" \
   "$STAGE_ROOT/deploy/ec2/sync-zoho-runtime.sh" \
+  "$STAGE_ROOT/deploy/ec2/verify-public-auth.sh" \
   "$STAGE_ROOT/docker/postgres-init.sh"
 
 # Preserve all operator settings while replacing only the immutable digest.
@@ -449,12 +461,24 @@ if grep -q '^SUTRA_AWS_STATIC_KEYS_ENABLED=' "$DOCKER_ENV"; then
 fi
 export SUTRA_AWS_STATIC_KEYS_ENABLED="$staged_static_keys_enabled"
 
+# New release scripts validate and materialize the exact CloudFormation-owned
+# storage descriptor into the staged operator environment before rendering.
+# The helper logs no bucket, key, credential, or object identifier.
+bash "$STAGE_ROOT/deploy/ec2/sync-evidence-runtime.sh" \
+  "$STAGE_ROOT/deploy/ec2/.env.ec2" "$DOCKER_ENV"
+
 # Render before touching the active host bundle. This catches malformed Compose
 # changes, missing environment keys and relative-volume regressions.
 docker compose \
   -f "$STAGE_ROOT/deploy/ec2/compose.prod.yaml" \
   --env-file "$STAGE_ROOT/deploy/ec2/.env.ec2" \
   --env-file "$DOCKER_ENV" config --quiet
+
+# Runtime synchronization happens inside redeploy.sh after the bundle switch.
+# Keep one root-only, transaction-scoped copy so any later failure restores the
+# previous OIDC/mail configuration before the old release is restarted. The
+# copy lives under STAGE_ROOT and is removed by cleanup after success or rollback.
+install -o 0 -g 0 -m 0600 "$DOCKER_ENV" "$RUNTIME_ENV_BACKUP"
 
 BACKUP_ROOT="$ROOT/.sutra/host-releases"
 install -d -m 0700 "$BACKUP_ROOT"
@@ -496,7 +520,7 @@ systemctl daemon-reload
 
 log "Applying the new bundle and database migration."
 set +e
-"$ROOT/deploy/ec2/redeploy.sh"
+SUTRA_REQUIRE_RUNTIME_SYNC=true "$ROOT/deploy/ec2/redeploy.sh"
 update_status=$?
 set -e
 if [[ "$update_status" -ne 0 ]]; then

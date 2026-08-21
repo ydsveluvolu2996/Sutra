@@ -590,10 +590,26 @@ class ExpandedInventoryClientFactory extends FakeClientFactory {
               RouteTables: [{
                 RouteTableId: "rtb-expanded",
                 VpcId: "vpc-east",
-                Associations: [{ Main: false, SubnetId: "subnet-east" }],
+                Associations: [{
+                  Main: false,
+                  RouteTableAssociationId: "rtbassoc-expanded",
+                  RouteTableId: "rtb-expanded",
+                  SubnetId: "subnet-east",
+                  AssociationState: { State: "associated" },
+                }],
                 Routes: [
-                  { DestinationCidrBlock: "10.0.0.0/16", GatewayId: "local" },
-                  { DestinationCidrBlock: "0.0.0.0/0", GatewayId: "igw-east" },
+                  {
+                    DestinationCidrBlock: "10.0.0.0/16",
+                    GatewayId: "local",
+                    State: "active",
+                    Origin: "CreateRouteTable",
+                  },
+                  {
+                    DestinationCidrBlock: "0.0.0.0/0",
+                    GatewayId: "igw-east",
+                    State: "active",
+                    Origin: "CreateRoute",
+                  },
                 ],
               }],
             }
@@ -892,8 +908,13 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     "aws.ec2.volume",
     "aws.ec2.network-interface",
     "aws.ec2.route-table",
+    "aws.ec2.route-table-association",
+    "aws.ec2.route",
     "aws.ec2.internet-gateway",
+    "aws.ec2.internet-gateway-attachment",
     "aws.ec2.network-acl",
+    "aws.ec2.network-acl-association",
+    "aws.ec2.network-acl-entry",
     "aws.elasticloadbalancingv2.load-balancer",
     "aws.elasticloadbalancingv2.listener",
     "aws.elasticloadbalancingv2.target-group",
@@ -909,9 +930,38 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     assert.ok(observed, resourceType);
     assert.match(observed.sourceApi ?? "", /^[a-z0-9]+:/u);
   }
+  const vpcChildTypes = new Set([
+    "aws.ec2.route",
+    "aws.ec2.route-table-association",
+    "aws.ec2.network-acl-entry",
+    "aws.ec2.network-acl-association",
+    "aws.ec2.internet-gateway-attachment",
+  ]);
+  assert.ok(
+    resources
+      .filter((resource) => vpcChildTypes.has(resource.resourceType))
+      .every((resource) => resource.arn === undefined),
+    "provider subresources without AWS ARNs must not receive invented ARNs",
+  );
   for (const key of ["volumes", "network-interfaces", "route-tables", "internet-gateways", "network-acls", "load-balancers", "listeners", "target-groups", "kms-aliases", "kms-keys", "dynamodb", "ecr", "eks"]) {
     assert.equal(clients.tokens.get(key)?.length, 2, key);
   }
+  assert.deepEqual(
+    ["ec2.route-tables", "ec2.internet-gateways", "ec2.network-acls"].map((collectorKey) => {
+      const entry = collection.collectorCoverage.find((coverage) => coverage.collectorKey === collectorKey);
+      return {
+        collectorKey,
+        status: entry?.status,
+        itemsObserved: entry?.itemsObserved,
+        pagesObserved: entry?.pagesObserved,
+      };
+    }),
+    [
+      { collectorKey: "ec2.route-tables", status: "SUCCEEDED", itemsObserved: 4, pagesObserved: 2 },
+      { collectorKey: "ec2.internet-gateways", status: "SUCCEEDED", itemsObserved: 2, pagesObserved: 2 },
+      { collectorKey: "ec2.network-acls", status: "SUCCEEDED", itemsObserved: 4, pagesObserved: 2 },
+    ],
+  );
   // Route table exposing 0.0.0.0/0 -> igw is the fact aws-network-exposure needs:
   // record the routed-to-IGW flag and associated subnets, never infer beyond it.
   const routeTable = resources.find((resource) => resource.resourceType === "aws.ec2.route-table");
@@ -924,16 +974,79 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
     routesToInternetGateway: true,
     routesToNatGateway: false,
     routes: [
-      { destination: "10.0.0.0/16", target: "local" },
-      { destination: "0.0.0.0/0", target: "igw-east" },
+      {
+        destination: "10.0.0.0/16",
+        destinationType: "ipv4_cidr",
+        target: "local",
+        targetType: "gateway",
+        state: "active",
+        origin: "CreateRouteTable",
+      },
+      {
+        destination: "0.0.0.0/0",
+        destinationType: "ipv4_cidr",
+        target: "igw-east",
+        targetType: "gateway",
+        state: "active",
+        origin: "CreateRoute",
+      },
     ],
     propagatingVgws: [],
   });
+  const routeAssociation = resources.find(
+    (resource) => resource.resourceType === "aws.ec2.route-table-association",
+  );
+  assert.equal(routeAssociation?.resourceId, "rtbassoc-expanded");
+  assert.deepEqual(routeAssociation?.configuration, {
+    routeTableId: "rtb-expanded",
+    vpcId: "vpc-east",
+    subnetId: "subnet-east",
+    main: false,
+    state: "associated",
+  });
+  const routes = resources.filter((resource) => resource.resourceType === "aws.ec2.route");
+  assert.deepEqual(routes.map((route) => ({ id: route.resourceId, configuration: route.configuration })), [
+    {
+      id: "rtb-expanded/route/10.0.0.0%2F16",
+      configuration: {
+        routeTableId: "rtb-expanded",
+        vpcId: "vpc-east",
+        destination: "10.0.0.0/16",
+        destinationType: "ipv4_cidr",
+        target: "local",
+        targetType: "gateway",
+        state: "active",
+        origin: "CreateRouteTable",
+      },
+    },
+    {
+      id: "rtb-expanded/route/0.0.0.0%2F0",
+      configuration: {
+        routeTableId: "rtb-expanded",
+        vpcId: "vpc-east",
+        destination: "0.0.0.0/0",
+        destinationType: "ipv4_cidr",
+        target: "igw-east",
+        targetType: "gateway",
+        state: "active",
+        origin: "CreateRoute",
+      },
+    },
+  ]);
   const internetGateway = resources.find((resource) => resource.resourceType === "aws.ec2.internet-gateway");
   assert.deepEqual(internetGateway?.configuration, {
     attachedVpcIds: ["vpc-east"],
     attachmentStates: ["attached"],
     attached: true,
+  });
+  const gatewayAttachment = resources.find(
+    (resource) => resource.resourceType === "aws.ec2.internet-gateway-attachment",
+  );
+  assert.equal(gatewayAttachment?.resourceId, "igw-east/attachment/vpc-east");
+  assert.deepEqual(gatewayAttachment?.configuration, {
+    internetGatewayId: "igw-east",
+    vpcId: "vpc-east",
+    state: "attached",
   });
   // NACL entries (ordered rule/action/CIDR) are the subnet-boundary port-filter evidence.
   const networkAcl = resources.find((resource) => resource.resourceType === "aws.ec2.network-acl");
@@ -945,6 +1058,29 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
       { ruleNumber: 100, egress: false, protocol: "-1", ruleAction: "allow", cidr: "0.0.0.0/0" },
       { ruleNumber: 32767, egress: false, protocol: "-1", ruleAction: "deny", cidr: "0.0.0.0/0" },
     ],
+  });
+  const aclAssociation = resources.find(
+    (resource) => resource.resourceType === "aws.ec2.network-acl-association",
+  );
+  assert.equal(aclAssociation?.resourceId, "aclassoc-1");
+  assert.deepEqual(aclAssociation?.configuration, {
+    networkAclId: "acl-east",
+    vpcId: "vpc-east",
+    subnetId: "subnet-east",
+  });
+  const aclEntries = resources.filter((resource) => resource.resourceType === "aws.ec2.network-acl-entry");
+  assert.deepEqual(aclEntries.map((entry) => entry.resourceId), [
+    "acl-east/entry/ingress/100",
+    "acl-east/entry/ingress/32767",
+  ]);
+  assert.deepEqual(aclEntries[0]?.configuration, {
+    networkAclId: "acl-east",
+    vpcId: "vpc-east",
+    ruleNumber: 100,
+    egress: false,
+    protocol: "-1",
+    ruleAction: "allow",
+    cidr: "0.0.0.0/0",
   });
   // Listener records the served ingress port/protocol — the network-exposure fact.
   const listener = resources.find((resource) => resource.resourceType === "aws.elasticloadbalancingv2.listener");
@@ -1041,6 +1177,12 @@ test("expanded CMDB families paginate, preserve API provenance, and create safe 
   assert.equal(hasEdge("vol-expanded", "i-east-1", "attached_to"), true);
   assert.equal(hasEdge("eni-expanded", "subnet-east", "runs_in"), true);
   assert.equal(hasEdge("orders", "key-expanded", "encrypted_by"), true);
+  assert.equal(hasEdge("rtb-expanded/route/0.0.0.0%2F0", "rtb-expanded", "contained_by"), true);
+  assert.equal(hasEdge("rtb-expanded/route/0.0.0.0%2F0", "igw-east", "routes_through"), true);
+  assert.equal(hasEdge("rtbassoc-expanded", "subnet-east", "runs_in"), true);
+  assert.equal(hasEdge("acl-east/entry/ingress/100", "acl-east", "contained_by"), true);
+  assert.equal(hasEdge("aclassoc-1", "subnet-east", "runs_in"), true);
+  assert.equal(hasEdge("igw-east/attachment/vpc-east", "igw-east", "contained_by"), true);
 });
 
 class ExpandedPartialFailureClientFactory extends ExpandedInventoryClientFactory {

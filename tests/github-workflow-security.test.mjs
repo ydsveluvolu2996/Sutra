@@ -323,6 +323,8 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.doesNotMatch(workflow, /github\.event\.workflow_run/u);
   assert.match(workflow, /RELEASE_SHA: \$\{\{ github\.sha \}\}/u);
   assert.match(workflow, /RELEASE_REASON: \$\{\{ inputs\.releaseReason \}\}/u);
+  assert.match(workflow, /EXPECTED_SHA: \$\{\{ inputs\.expectedSha \}\}/u);
+  assert.match(workflow, /expectedSha:[\s\S]*required: true/u);
   assert.match(workflow, /GITHUB_EVENT_NAME.+workflow_dispatch/u);
   assert.match(workflow, /^\s{4}environment: ec2-live-release\s*$/mu);
   for (const variable of ["AWS_ACCOUNT_ID", "AWS_REGION", "AWS_ROLE_ARN", "EC2_INSTANCE_ID"]) {
@@ -331,6 +333,12 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /GITHUB_REF.+refs\/heads\/main/u);
   assert.match(workflow, /ref: \$\{\{ env\.RELEASE_SHA \}\}/u);
   assert.match(workflow, /git rev-parse HEAD.+RELEASE_SHA/u);
+  assert.match(workflow, /EXPECTED_SHA.+RELEASE_SHA/u);
+  assert.match(workflow, /actions: read/u);
+  assert.match(workflow, /newest CI run for the exact revision/u);
+  assert.match(workflow, /sort_by\(\.run_number, \.run_attempt, \.created_at\)/u);
+  assert.match(workflow, /\.status.+completed/u);
+  assert.match(workflow, /\.conclusion.+success/u);
   // Publish-before-ship is enforced, not remembered: an automated release must
   // refuse to deploy an application whose pinned onboarding template was never
   // published, because the customer quick-create link would 404.
@@ -401,6 +409,8 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /pnpm typecheck:collector/u);
   assert.match(workflow, /pnpm lint/u);
   assert.match(workflow, /pnpm test:templates/u);
+  assert.match(workflow, /tests\/ec2-public-release-verification\.test\.mjs/u);
+  assert.match(workflow, /tests\/zoho-production-runtime\.test\.mjs/u);
   assert.match(workflow, /deploy\/ec2\/validate-ops\.sh/u);
   assert.match(workflow, /imageTagMutability/u);
   assert.match(workflow, /tag_mutability.+IMMUTABLE/u);
@@ -434,6 +444,8 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(workflow, /served_image.+IMAGE_REF/u);
   assert.match(workflow, /x-robots-tag:.*noindex/u);
   assert.match(workflow, /apex_code.+308.+apex_location.+PUBLIC_ORIGIN/u);
+  assert.match(workflow, /verify-public-auth\.sh "\$\{PUBLIC_ORIGIN\}"/u);
+  assert.match(workflow, /Release commit:.*RELEASE_SHA/u);
   assert.doesNotMatch(
     workflow,
     /AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|aws ssm start-session|AWS-RunShellScript|aws ec2 (?:start|stop)-instances/u,
@@ -442,9 +454,11 @@ test("EC2 releases use OIDC, bounded source gates, immutable images, exact-host 
   assert.match(deployHelper, /git fetch origin main/u);
   assert.match(deployHelper, /git ls-remote origin refs\/heads\/main/u);
   assert.match(deployHelper, /actions\/workflows\/ci\.yml\/runs\?branch=main/u);
-  assert.match(deployHelper, /head_sha == \$release_sha and \.conclusion == "success"/u);
+  assert.match(deployHelper, /sort_by\(\.run_number, \.run_attempt, \.created_at\)/u);
+  assert.match(deployHelper, /newest CI run for current main/u);
   assert.match(deployHelper, /gh workflow run ec2-live-release\.yml/u);
   assert.match(deployHelper, /--ref main/u);
+  assert.match(deployHelper, /expectedSha=\$\{release_sha\}/u);
   assert.match(deployHelper, /event=workflow_dispatch&branch=main/u);
   assert.match(deployHelper, /pending_deployments/u);
   assert.match(deployHelper, /state: "approved"/u);
