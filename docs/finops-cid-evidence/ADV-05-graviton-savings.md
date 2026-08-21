@@ -273,8 +273,10 @@ All commands ran on Node `v22.23.2` against implementation baseline
 | Field | Value |
 |---|---|
 | Feature implementation | `43c625d` (already landed and remote); verified at baseline `2e9b8a7` |
+| Evidence/tracker checkpoint | `537da717c7a8050b9fe54f06dacc8361e766f0e6`; remote `develop` matched |
 | Evidence file updated | This record |
 | Tracker maturity | `PARTIAL_PIPELINE` → `LOCAL_VERTICAL_CANDIDATE` |
 | Execution ledger | `docs/CLOUDAWARE_AWS_IMPLEMENTATION_LEDGER.md` |
 | Controlled provider/live evidence | `PENDING_EXTERNAL_ACCEPTANCE` |
+| Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); [run 32453805907](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32453805907) passed every required job for the exact checkpoint SHA |
 | Next dependency-safe slice | Canonical AWS catalog and Navigator foundation |

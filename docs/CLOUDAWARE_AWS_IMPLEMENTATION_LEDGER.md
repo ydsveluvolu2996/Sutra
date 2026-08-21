@@ -11,7 +11,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 |---|---|
 | Date | 2026-08-21 (Asia/Kolkata) |
 | Baseline commit | `2e9b8a7d76a91e711d79e9a0c739d278fb2c2c1c` |
-| Final commit | Pending verification and `pnpm work:save` |
+| Final implementation/evidence commit | `537da717c7a8050b9fe54f06dacc8361e766f0e6` |
 | Branch | `develop` only |
 | Vertical | Gate A prerequisite — ADV-05 Graviton Savings |
 | Measurable outcome | Reconciled already-landed collector/runtime/IAM/migrations against G0–G6 and promoted ADV-05 from `PARTIAL_PIPELINE` to `LOCAL_VERTICAL_CANDIDATE`. |
@@ -23,7 +23,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 | External acceptance | `PENDING_EXTERNAL_ACCEPTANCE` — no disposable multi-account/two-tenant AWS evidence is available in this repository session. |
 | Known limitations | Authority-dependent CUR2/pricing/compatibility/workload/license data fails closed as configuration-required; exact provider reconciliation and live UI acceptance are unclaimed. |
 | Next slice | After the prerequisite and exact CI pass: Milestone 0 canonical AWS catalog and Navigator foundation. |
-| Standing PR / CI | Pending checkpoint push and exact run inspection. |
+| Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); [exact CI run 32453805907](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32453805907) passed all required jobs for `537da717c7a8050b9fe54f06dacc8361e766f0e6`. |
 
 ### Verification record
 
@@ -39,6 +39,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 | Secret scan | Passed for 2,652 source files |
 | CloudFormation | 28 templates passed with only 42 documented Bedrock catalog false positives suppressed |
 | UI evidence | SSR/native chart contract passed; signed-in exact-tree/browser acceptance remains external |
+| Standing PR CI | Exact-SHA resolution, application quality/build, collector/CloudFormation/PostgreSQL, scanner image/vulnerability, and all six offline shards passed in run `32453805907` |
 
 The first direct PostgreSQL attempt was blocked because Docker Desktop could not
 mount `~/Documents`. The same fixed `HEAD` was archived to an isolated
