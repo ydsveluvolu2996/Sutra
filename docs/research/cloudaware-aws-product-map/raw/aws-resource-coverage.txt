@@ -1,0 +1,984 @@
+Integrations
+Amazon Web Services (AWS)
+Resource Coverage
+AWS Resource Coverage
+
+Cloudaware discovers AWS resources across connected accounts and regions and represents them as CMDB objects. The list below shows the supported AWS object types that can be collected when the required services, regions, and permissions are available.
+
+AWS ACM Certificate
+AWS ACM Certificate Domain Validation
+AWS ACM Certificate Resource Link
+AWS API Gateway API
+AWS API Gateway API Endpoint Link
+AWS API Gateway API Key
+AWS API Gateway Authorizer
+AWS API Gateway Client Certificate
+AWS API Gateway Deployment
+AWS API Gateway Documentation Part
+AWS API Gateway Domain Endpoint Link
+AWS API Gateway Domain Name
+AWS API Gateway Integration
+AWS API Gateway Method
+AWS API Gateway Model
+AWS API Gateway Resource
+AWS API Gateway Route
+AWS API Gateway Stage
+AWS API Gateway Usage Plan
+AWS API Gateway Usage Plan Key
+AWS API Gateway VPC Link
+AWS API Gateway VPC Link NLB Link
+AWS API Gateway VPC Link SG Link
+AWS API Gateway VPC Link Subnet Link
+AWS Account
+AWS Account Availability Zone
+AWS Account Limits
+AWS Account Region
+AWS App AutoScaling Scalable Target
+AWS App AutoScaling Scaling Policy
+AWS App AutoScaling Scaling Policy Alarm
+AWS App AutoScaling Scheduled Action
+AWS App Mesh
+AWS App Mesh Route
+AWS App Mesh Route Target
+AWS App Mesh Virtual Node
+AWS App Mesh Virtual Router
+AWS App Mesh Virtual Service
+AWS AppStream Fleet
+AWS AppStream Fleet Security Group Link
+AWS AppStream Fleet Subnet Link
+AWS AppStream Image
+AWS AppStream Image Application
+AWS AppStream Image Builder
+AWS AppStream Image Builder Error
+AWS AppStream Image Builder SG Link
+AWS AppStream Image Builder Subnet Link
+AWS AppStream Stack
+AWS AppStream Stack Storage Connector
+AWS Athena Named Query
+AWS Athena Work Group
+AWS AutoScaling Scaling Instruction
+AWS AutoScaling Scaling Plan
+AWS AutoScaling Scaling Plan Resource
+AWS AutoScaling Scaling Policy
+AWS AutoScaling Target Tracking Config
+AWS Availability Zone
+AWS Backup Backup Plan
+AWS Backup Backup Plan Version
+AWS Backup Backup Rule
+AWS Backup Backup Rule Copy Action
+AWS Backup Backup Selection
+AWS Backup Backup Selection Tag
+AWS Backup Backup Vault
+AWS Backup Framework
+AWS Backup Legal Hold
+AWS Backup Legal Hold Rec. Point Select
+AWS Backup Recovery Point
+AWS Backup Report Plan
+AWS Backup Restore Testing Plan
+AWS Backup Restore Testing Selection
+AWS Backup Selection Resource Link
+AWS Backup Tiering Configuration
+AWS Batch Compute Environment
+AWS Batch Job
+AWS Batch Job Definition
+AWS Batch Job Queue
+AWS Bedrock Agent
+AWS Bedrock Agent Version
+AWS Bedrock Custom Model
+AWS Bedrock Endpoint Subnet Link
+AWS Bedrock Evaluat Job Found Model Link
+AWS Bedrock Evaluat Job Import ModelLink
+AWS Bedrock Evaluat Job Profile Link
+AWS Bedrock Evaluat Job Provision Link
+AWS Bedrock Evaluat Job Router Link
+AWS Bedrock Evaluation Job
+AWS Bedrock Flow
+AWS Bedrock Flow Version
+AWS Bedrock Foundation Model
+AWS Bedrock Guardrail
+AWS Bedrock Imported Model
+AWS Bedrock Inference Profile
+AWS Bedrock Invocation Job SG Link
+AWS Bedrock Invocation Job Subnet Link
+AWS Bedrock Job SageMaker Endpoint Link
+AWS Bedrock Knowledge Base
+AWS Bedrock Marketplace Endpoint SG Link
+AWS Bedrock Marketplace Model Endpoint
+AWS Bedrock Model Copy Job
+AWS Bedrock Model Custom Job SG Link
+AWS Bedrock Model Custom Job Subnet Link
+AWS Bedrock Model Customization Job
+AWS Bedrock Model Import Job
+AWS Bedrock Model Import Job SG Link
+AWS Bedrock Model Import Job Subnet Link
+AWS Bedrock Model Invocation Job
+AWS Bedrock Profile App Model Link
+AWS Bedrock Profile System Model Link
+AWS Bedrock Prompt
+AWS Bedrock Prompt Foundation Model Link
+AWS Bedrock Prompt Profile Link
+AWS Bedrock Prompt Router
+AWS Bedrock Prompt Router Profile Link
+AWS Bedrock Prompt SageMaker Model Link
+AWS Bedrock Provisioned Model Throughput
+AWS Bedrock Router Foundation Model Link
+AWS Budget
+AWS Budget Notification
+AWS Budget Period
+AWS CloudFormation Export
+AWS CloudFormation Extension
+AWS CloudFormation Import
+AWS CloudFormation Publisher
+AWS CloudFormation Stack
+AWS CloudFormation Stack Resource (New)
+AWS CloudFormation Stack Resource Drift
+AWS CloudFormation Stack Set
+AWS CloudFormation Stack Set Instance
+AWS CloudFormation Stack Set Operation
+AWS CloudFront Cache Behavior
+AWS CloudFront Content Type Profile
+AWS CloudFront Custom Error Response
+AWS CloudFront Distribution
+AWS CloudFront Encryption Entity
+AWS CloudFront FieldLevelEncrypt Config
+AWS CloudFront FieldLevelEncrypt Profile
+AWS CloudFront Lambda Func Association
+AWS CloudFront Origin
+AWS CloudFront Origin Access Identity
+AWS CloudFront Public Key
+AWS CloudFront Query Arg Profile
+AWS CloudFront Signer
+AWS CloudHSM Backup
+AWS CloudHSM Cluster
+AWS CloudHSM Cluster Subnet Link
+AWS CloudHSM HSM
+AWS CloudMap Instance
+AWS CloudMap Namespace
+AWS CloudMap Service
+AWS CloudSearch Analysis Scheme
+AWS CloudSearch Domain
+AWS CloudSearch Expression
+AWS CloudSearch Index Field
+AWS CloudSearch Suggester
+AWS CloudTrail Channel
+AWS CloudTrail Dashboard
+AWS CloudTrail Event Data Store
+AWS CloudTrail Query
+AWS CloudTrail Trail
+AWS CloudWatch Logs Delivery
+AWS CloudWatch Logs Delivery Dstn
+AWS CloudWatch Logs Delivery Source
+AWS CloudWatch Logs Destination
+AWS CloudWatch Logs Log Group
+AWS CloudWatch Logs Metric Filter
+AWS CloudWatch Logs Subscription Filter
+AWS CloudWatch Metric Alarm
+AWS CloudWatch Metric Alarm Action
+AWS CloudWatch Metric Stream
+AWS CodeBuild Build
+AWS CodeBuild Project
+AWS CodeCommit Branch
+AWS CodeCommit Repository
+AWS CodeCommit Repository Trigger
+AWS CodeDeploy Application
+AWS CodeDeploy Application Revision
+AWS CodeDeploy Deployment
+AWS CodeDeploy Deployment Configuration
+AWS CodeDeploy Deployment Group
+AWS CodeDeploy Deployment Target
+AWS CodeDeploy On-Premises Instance
+AWS CodePipeline Action
+AWS CodePipeline Pipeline
+AWS CodePipeline Pipeline Execution
+AWS CodePipeline Stage
+AWS Cognito ID Pool Open Connect Link
+AWS Cognito ID Pool SAML Provider Link
+AWS Cognito Identity Pool
+AWS Cognito Identity Pool Provider
+AWS Cognito User Pool
+AWS Cognito User Pool Client
+AWS Cognito User Pool Group
+AWS Cognito User Pool Identity Provider
+AWS Cognito User Pool Resource Server
+AWS Comprehend Document Classifier
+AWS Comprehend Document Classifier SG
+AWS Comprehend Document Classifier Subne
+AWS Comprehend Endpoint
+AWS Comprehend Entity Recognizer
+AWS Comprehend Entity Recognizer SG
+AWS Comprehend Entity Recognizer Subnet
+AWS Compute Optimizer ASG Recommendation
+AWS Compute Optimizer EBS Volume Rec.
+AWS Compute Optimizer EC2 Instance Rec.
+AWS Compute Optimizer ECS Service Rec.
+AWS Compute Optimizer Lambda Func. Rec.
+AWS Compute Optimizer RDS Database Rec.
+AWS Config Delivery Channel
+AWS Config Recorder
+AWS Config Rule
+AWS Config Rule Resource Compliance
+AWS Connect Agent Status
+AWS Connect Contact Flow
+AWS Connect Contact Flow Module
+AWS Connect Customer Integration
+AWS Connect Customer Object Type
+AWS Connect Customer Profiles Domain
+AWS Connect Customer Profiles Job
+AWS Connect Customer Profiles Workflow
+AWS Connect Customer Template
+AWS Connect Hours Of Operation
+AWS Connect Instance
+AWS Connect Instance LambdaFunction Link
+AWS Connect Instance Storage Config
+AWS Connect Integration Association
+AWS Connect Lex Bot
+AWS Connect Outbound Campaigns Campaign
+AWS Connect Phone Number
+AWS Connect Queue
+AWS Connect Quick Connect
+AWS Connect Routing Profile
+AWS Connect Rule
+AWS Connect Security Profile
+AWS Connect Task Template
+AWS Connect Traffic Distribution Group
+AWS Connect User
+AWS Connect User Hierarchy Group
+AWS Connect User Security Profile Link
+AWS CostExplorer Reservation Coverage
+AWS CostExplorer Reservation Utilization
+AWS CostExplorer SavingsPlan Utilization
+AWS DAX Cluster
+AWS DAX Cluster EC2 Security Group Link
+AWS DAX Node
+AWS DAX Subnet Group
+AWS DAX Subnet Group EC2 Subnet Link
+AWS DMS Certificate
+AWS DMS Connection
+AWS DMS Endpoint
+AWS DMS Migration Task
+AWS DMS Replication Instance
+AWS DMS Replication Instance SG Link
+AWS DMS Subnet Group
+AWS DMS Subnet Group Subnet Link
+AWS Data Pipeline Pipeline
+AWS Data Sync Agent
+AWS Data Sync Agent Security Group Link
+AWS Data Sync Agent VPC Subnet Link
+AWS Data Sync Location
+AWS Data Sync Location Agent Link
+AWS Data Sync Task
+AWS DataSync Task Network Interface Link
+AWS Direct Connect Connection
+AWS Direct Connect Gateway
+AWS Direct Connect Gateway Association
+AWS Direct Connect Gateway Attachment
+AWS Direct Connect LAG
+AWS Direct Connect Location
+AWS Direct Connect Virtual Interface
+AWS Directory
+AWS Directory Assessment
+AWS Directory Assessment EC2InstanceLink
+AWS Directory Assessment VPC Subnet Link
+AWS Directory Certificate
+AWS Directory Conditional Forwarder
+AWS Directory Domain Controller
+AWS Directory EC2 Instance Link
+AWS Directory Event Topic
+AWS Directory Group
+AWS Directory Group Member Link
+AWS Directory IP Route
+AWS Directory Limits
+AWS Directory Logs Subscription Link
+AWS Directory Schema Extension
+AWS Directory Snapshot
+AWS Directory Trust
+AWS Directory User
+AWS Directory VPC Subnet Link
+AWS DynamoDB Backup
+AWS DynamoDB Export
+AWS DynamoDB Global Secondary Index
+AWS DynamoDB Global Table
+AWS DynamoDB Global Table Table Link
+AWS DynamoDB Local Secondary Index
+AWS DynamoDB Stream
+AWS DynamoDB Stream Shard
+AWS DynamoDB Table
+AWS EBS Snapshot
+AWS EBS Volume
+AWS EBS Volume Status Event
+AWS EC2 Attack Surface Row
+AWS EC2 Auto Scaling Group
+AWS EC2 Auto Scaling Group ELB Link
+AWS EC2 Auto Scaling Group ELB TG Link
+AWS EC2 Auto Scaling Group Instance Link
+AWS EC2 Auto Scaling Group Tfc.Src.Link
+AWS EC2 Auto Scaling Lifecycle Hook
+AWS EC2 Auto Scaling Notification
+AWS EC2 Auto Scaling Policy
+AWS EC2 Auto Scaling Scheduled Action
+AWS EC2 Capacity Reservation
+AWS EC2 DHCP Options
+AWS EC2 Elastic IP
+AWS EC2 Image
+AWS EC2 Image Snapshot Link
+AWS EC2 Instance
+AWS EC2 Instance Fact
+AWS EC2 Instance License Config Link
+AWS EC2 Instance Mount Point
+AWS EC2 Instance SG Link
+AWS EC2 Instance SSL Certificate
+AWS EC2 Instance Status Event
+AWS EC2 Instance Volume Link
+AWS EC2 Key Pair
+AWS EC2 Launch Configuration
+AWS EC2 Launch Configuration SG Link
+AWS EC2 Launch Template
+AWS EC2 Launch Template License Link
+AWS EC2 Launch Template SG Link
+AWS EC2 Launch Template Version
+AWS EC2 Network Interface
+AWS EC2 Network Interface SG Link
+AWS EC2 Placement Group
+AWS EC2 Reserved Instances
+AWS EC2 Security Group
+AWS EC2 Security Group Rule
+AWS EC2 Spot Fleet Req ELB Link
+AWS EC2 Spot Fleet Req ELB TG Link
+AWS EC2 Spot Fleet Req Launch Tpl Link
+AWS EC2 Spot Fleet Request
+AWS EC2 Spot Instance Request
+AWS EC2 Spot Instance Request SG Link
+AWS ECR Image
+AWS ECR Registry
+AWS ECR Repository
+AWS ECS Cluster
+AWS ECS Container
+AWS ECS Container Definition
+AWS ECS Container Instance
+AWS ECS Container Override
+AWS ECS Service
+AWS ECS Service Deployment
+AWS ECS Service Deployment SG Link
+AWS ECS Service Deployment Subnet Link
+AWS ECS Service ELB Target Group Link
+AWS ECS Service Load Balancer Link
+AWS ECS Service SG Link
+AWS ECS Service Subnet Link
+AWS ECS Task
+AWS ECS Task Definition
+AWS ECS Task Set
+AWS ECS Task Set Load Balancer Link
+AWS ECS Task Set SG Link
+AWS ECS Task Set Subnet Link
+AWS EFS File System
+AWS EFS Mount Target
+AWS EFS Mount Target SG Link
+AWS EKS Cluster
+AWS EKS Cluster Config Map
+AWS EKS Cluster Daemon Set
+AWS EKS Cluster Deployment
+AWS EKS Cluster Endpoint
+AWS EKS Cluster Fact
+AWS EKS Cluster Fargate Profile
+AWS EKS Cluster Fargate Profile Subnet
+AWS EKS Cluster HPA
+AWS EKS Cluster Ingress
+AWS EKS Cluster Limit Range
+AWS EKS Cluster Namespace
+AWS EKS Cluster Network Policy
+AWS EKS Cluster Network Policy Rule
+AWS EKS Cluster Node
+AWS EKS Cluster Node Address
+AWS EKS Cluster Node Condition
+AWS EKS Cluster Node Group
+AWS EKS Cluster Node Group Subnet Link
+AWS EKS Cluster Pod
+AWS EKS Cluster Pod Container
+AWS EKS Cluster Pod Disruption Budget
+AWS EKS Cluster Replica Set
+AWS EKS Cluster Resource Quota
+AWS EKS Cluster Role
+AWS EKS Cluster Role Binding
+AWS EKS Cluster Secret
+AWS EKS Cluster Security Group Link
+AWS EKS Cluster Service
+AWS EKS Cluster Service Account
+AWS EKS Cluster Service Account Secret
+AWS EKS Cluster Stateful Set
+AWS EKS Cluster Storage Class
+AWS EKS Cluster Subnet Link
+AWS ELB Load Balancer
+AWS ELB Load Balancer Listener
+AWS ELB Load Balancer Listener Rule
+AWS ELB Load Balancer Policy
+AWS ELB Load Balancer SG Link
+AWS ELB Load Balancer SSL Certificate
+AWS ELB Load Balancer Subnet Link
+AWS ELB Load Balancer Target Group
+AWS ELB Load Balancer Target Group Link
+AWS ELB Load Balancer Target Link
+AWS EMR Application
+AWS EMR Cluster
+AWS EMR Cluster Additional SG
+AWS EMR Command
+AWS EMR Instance
+AWS EMR Instance EBS Volume Link
+AWS EMR Instance Fleet
+AWS EMR Instance Group
+AWS EMR Instance Group Scaling Rule
+AWS EMR Instance Type Specification
+AWS EMR Security Configuration
+AWS ElastiCache Cluster
+AWS ElastiCache Cluster Snapshot
+AWS ElastiCache Cluster VPC SG Link
+AWS ElastiCache Event
+AWS ElastiCache Node
+AWS ElastiCache Node Group
+AWS ElastiCache Node Snapshot
+AWS ElastiCache Parameter Group
+AWS ElastiCache Replication Group
+AWS ElastiCache Reserved Node
+AWS ElastiCache Security Group
+AWS ElastiCache Service Update
+AWS ElastiCache Subnet
+AWS ElastiCache Subnet Group
+AWS ElastiCache Update Action
+AWS Elastic Beanstalk Application
+AWS Elastic Beanstalk Application Templ.
+AWS Elastic Beanstalk Application Ver.
+AWS Elastic Beanstalk Configuration Set.
+AWS Elastic Beanstalk Environment
+AWS Elastic Beanstalk Environment Res.
+AWS Elastic Beanstalk Event
+AWS Elastic Beanstalk Platform
+AWS Elastic Beanstalk Platform Cust. Img
+AWS Elastic Beanstalk Solution Stack
+AWS EventBridge API Destination
+AWS EventBridge Archive
+AWS EventBridge Connection
+AWS EventBridge Endpoint
+AWS EventBridge Endpoint Event Bus Link
+AWS EventBridge Event Bus
+AWS EventBridge Event Source
+AWS EventBridge Replay
+AWS EventBridge Replay Rule Link
+AWS EventBridge Rule
+AWS EventBridge Target
+AWS FSx Backup
+AWS FSx FS Network Interface Link
+AWS FSx File System
+AWS FSx File System Subnet Link
+AWS Firewall Manager Apps List
+AWS Firewall Manager Protocols List
+AWS Firewall Manager Resource Set
+AWS Firewall Manager Security Policy
+AWS Glacier Vault
+AWS GlobalAccelerator Accelerator
+AWS GlobalAccelerator BYOIP CIDR
+AWS GlobalAccelerator Endpoint
+AWS GlobalAccelerator Endpoint Group
+AWS GlobalAccelerator IP Set
+AWS GlobalAccelerator Listener
+AWS Glue Catalog
+AWS Glue Classifier
+AWS Glue Connection
+AWS Glue Connection Security Group Link
+AWS Glue Crawler
+AWS Glue Crawler Classifier Link
+AWS Glue Database
+AWS Glue Development Endpoint
+AWS Glue Development Endpoint SG Link
+AWS Glue Job
+AWS Glue ML Task Run
+AWS Glue ML Transform
+AWS Glue Security Configuration
+AWS Glue Table
+AWS Glue Trigger
+AWS GuardDuty Detector
+AWS GuardDuty Finding
+AWS GuardDuty IP List
+AWS GuardDuty Malware Protection Plan
+AWS GuardDuty Member
+AWS IAM Access Analyzer
+AWS IAM Access Analyzer Finding
+AWS IAM Access Key
+AWS IAM Group
+AWS IAM Group Policy
+AWS IAM Group Policy Attachment
+AWS IAM ID Center Acc. Provisioned Link
+AWS IAM ID Center Account Assignment
+AWS IAM ID Center Group
+AWS IAM ID Center Group Membership Link
+AWS IAM ID Center Instance
+AWS IAM ID Center Managed Policy Link
+AWS IAM ID Center Permission Set
+AWS IAM ID Center User
+AWS IAM ID Ctr Cust. Managed Policy Link
+AWS IAM Instance Profile
+AWS IAM OpenID Connect Provider
+AWS IAM Password Policy
+AWS IAM Policy
+AWS IAM Role
+AWS IAM Role Policy
+AWS IAM Role Policy Attachment
+AWS IAM SAML Provider
+AWS IAM SSH Public Key
+AWS IAM Server Certificate
+AWS IAM Signing Certificate
+AWS IAM User
+AWS IAM User Group Link
+AWS IAM User Policy
+AWS IAM User Policy Attachment
+AWS IPAM
+AWS IPAM Discovered Account
+AWS IPAM Discovered Resource CIDR
+AWS IPAM Pool
+AWS IPAM Pool Allocation
+AWS IPAM Pool CIDR
+AWS IPAM Public IPv4 Pool
+AWS IPAM Resource CIDR
+AWS IPAM Resource Discovery
+AWS IPAM Resource Discovery Association
+AWS IPAM Scope
+AWS IoT Certificate
+AWS IoT Policy
+AWS IoT Policy Principle
+AWS IoT Rule
+AWS IoT Thing
+AWS IoT Thing Principle
+AWS IoT Thing Type
+AWS KMS Alias
+AWS KMS Grant
+AWS KMS Key
+AWS KMS Key Policy
+AWS Kendra Data Source
+AWS Kendra Experience
+AWS Kendra Experience Data Source Link
+AWS Kendra Experience FAQ Link
+AWS Kendra FAQ
+AWS Kendra Index
+AWS Kendra Query Suggestion Block List
+AWS Kendra Thesaurus
+AWS Kinesis Analytics Application
+AWS Kinesis Firehose Delivery Stream
+AWS Kinesis Firehose Destination
+AWS Kinesis Stream
+AWS Lambda Alias
+AWS Lambda Code Signing Config
+AWS Lambda Event Source
+AWS Lambda Function
+AWS Lambda Function Layer Version Link
+AWS Lambda Function Security Group Link
+AWS Lambda Function Subnet Link
+AWS Lambda Function Vers Layer VersLink
+AWS Lambda Function Version
+AWS Lambda Function Version SG Link
+AWS Lambda Function Version Subnet Link
+AWS Lambda Layer
+AWS Lambda Layer Version
+AWS Lex Bot
+AWS Lex Bot Alias
+AWS Lex Bot Locale
+AWS Lex Bot Version
+AWS Lex Intent
+AWS Lex Slot Type
+AWS License Manager Association
+AWS License Manager Grant
+AWS License Manager License
+AWS License Manager License Config
+AWS License Manager Linux Sub Instance
+AWS License Manager Linux Sub Settings
+AWS License Manager LinuxSubRegdProvider
+AWS License Manager Report Generator
+AWS License Manager Service Settings
+AWS License Manager USubIdProvSubnetLink
+AWS License Manager Usage
+AWS License Manager User Association
+AWS License Manager User Sub IdProvider
+AWS License Manager User Sub Instance
+AWS License Manager User Sub Product
+AWS LicenseManager UserSubServerEndpoint
+AWS Lightsail DNS Zone
+AWS Lightsail Disk
+AWS Lightsail Disk Snapshot
+AWS Lightsail Instance
+AWS Lightsail Instance LoadBalancer Link
+AWS Lightsail Instance Snapshot
+AWS Lightsail Load Balancer
+AWS Lightsail Static IP Address
+AWS MQ Broker
+AWS MQ Broker Pending SG Link
+AWS MQ Broker Security Group Link
+AWS MQ Broker Subnet Link
+AWS MQ Broker User
+AWS MQ Configuration
+AWS MQ Configuration Revision
+AWS MSK Cluster
+AWS MSK Cluster Security Group Link
+AWS MSK Cluster Subnet Link
+AWS MSK Configuration
+AWS MSK Configuration Revision
+AWS MSK Node
+AWS MWAA Environment
+AWS Managed Blockchain Invitation
+AWS Managed Blockchain Member
+AWS Managed Blockchain Network
+AWS Managed Blockchain Node
+AWS Managed Blockchain Proposal
+AWS MedLive Chan Dest MedPack Chan Link
+AWS MediaConnect Entitlement
+AWS MediaConnect Flow
+AWS MediaConnect Flow Entitlement Link
+AWS MediaConnect Flow Output
+AWS MediaConnect Flow Source
+AWS MediaConvert Endpoint
+AWS MediaConvert Queue
+AWS MediaLive Channel
+AWS MediaLive Channel Destination
+AWS MediaLive Channel Input Attachment
+AWS MediaLive Channel Schedule
+AWS MediaLive Input
+AWS MediaLive Input Destination
+AWS MediaLive Input Security Group
+AWS MediaLive Input Security Group Link
+AWS MediaLive Input Source
+AWS MediaLive Reservation
+AWS MediaPackage Channel
+AWS MediaPackage Channel Input Endpoint
+AWS MediaPackage Origin Endpoint
+AWS MediaPackage VOD Asset
+AWS MediaPackage VOD Packaging Config
+AWS MediaPackage VOD Packaging Group
+AWS MediaStore Container
+AWS MediaStore Container CORS Rule
+AWS MediaTailor Playback Configuration
+AWS NetworkFirewall Firewall
+AWS NetworkFirewall Firewall Policy
+AWS NetworkFirewall Firewall SubnetLink
+AWS NetworkFirewall PolicyRuleGroupLink
+AWS NetworkFirewall Rule Group
+AWS NetworkFirewall TLS InspectCertLink
+AWS NetworkFirewall TLS InspectionConfig
+AWS OpenSearch Domain
+AWS OpenSearch Domain Package Link
+AWS OpenSearch Domain SG Link
+AWS OpenSearch Domain Subnet Link
+AWS OpenSearch Package
+AWS OpenSearch Reserved Instance
+AWS OpsWorks App
+AWS OpsWorks Instance
+AWS OpsWorks Instance Layer Link
+AWS OpsWorks Layer
+AWS OpsWorks Permission
+AWS OpsWorks Resource
+AWS OpsWorks Stack
+AWS OpsWorks User Profile
+AWS Organization
+AWS Organization Account
+AWS Organization Policy
+AWS Organization Policy Account Link
+AWS Organization Policy Root Link
+AWS Organization Root
+AWS Organizational Unit
+AWS Organizational Unit Policy Link
+AWS Polly Lexicon
+AWS Polly Lexicon Synthesis Task Link
+AWS Polly Speech Synthesis Task
+AWS QuickSight Action Connector
+AWS QuickSight Custom Permission
+AWS QuickSight Flow
+AWS QuickSight Group
+AWS QuickSight IAM Policy Assign. User
+AWS QuickSight Namespace
+AWS QuickSight User
+AWS QuickSight User Group Link
+AWS QuickSight VPC Conn. Network Int.
+AWS QuickSight VPC Connection
+AWS RAM Permission
+AWS RAM Permission Association
+AWS RAM Permission Version
+AWS RAM Principal
+AWS RAM Resource
+AWS RAM Resource Share
+AWS RAM Resource Share Invitation
+AWS RAM Resource Share Principal Link
+AWS RAM Resource Share Resource Link
+AWS RDS Blue Green Deployment
+AWS RDS Cluster
+AWS RDS Cluster Automated Backup
+AWS RDS Cluster Backtrack
+AWS RDS Cluster Endpoint
+AWS RDS Cluster IAM Role Link
+AWS RDS Cluster Parameter Group
+AWS RDS Cluster Snapshot
+AWS RDS Cluster VPC SG Link
+AWS RDS Custom Engine Version
+AWS RDS Event
+AWS RDS Event Subscription
+AWS RDS Global Cluster
+AWS RDS Global Cluster RDS Cluster Link
+AWS RDS Instance
+AWS RDS Instance Automated Backup
+AWS RDS Instance IAM Role Link
+AWS RDS Instance Parameter Group Link
+AWS RDS Instance SG Link (Classic)
+AWS RDS Instance SG Link (VPC)
+AWS RDS Option Group
+AWS RDS Option Group Option
+AWS RDS Parameter
+AWS RDS Parameter Group
+AWS RDS Pending Maintenance Action
+AWS RDS Proxy
+AWS RDS Proxy Auth Configuration
+AWS RDS Proxy Endpoint
+AWS RDS Proxy Endpoint VPC SG Link
+AWS RDS Proxy Endpoint VPC Subnet Link
+AWS RDS Proxy Target Group
+AWS RDS Proxy Target Group Target Link
+AWS RDS Proxy VPC Security Group Link
+AWS RDS Proxy VPC Subnet Link
+AWS RDS Reserved Instance
+AWS RDS Security Group (Classic)
+AWS RDS Security Group Rule (Classic)
+AWS RDS Shard Group
+AWS RDS Snapshot
+AWS RDS Subnet Group
+AWS RDS Subnet Group Subnet Link
+AWS RDS Tenant Database
+AWS RDS Tenant Database Snapshot
+AWS RDS Zero-ETL Integration
+AWS Redshift Cluster
+AWS Redshift Cluster Parameter
+AWS Redshift Cluster Parameter Group
+AWS Redshift Cluster ParameterGroup Link
+AWS Redshift Cluster Role Link
+AWS Redshift Cluster SG (Classic)
+AWS Redshift Cluster SG Link (Classic)
+AWS Redshift Cluster SG Link (VPC)
+AWS Redshift Cluster Subnet Group
+AWS Redshift Cluster VPC Endpoint Link
+AWS Redshift Cluster VPC Endpoint SG
+AWS Redshift Data Share
+AWS Redshift Endpoint Access
+AWS Redshift Endpoint Authorization
+AWS Redshift Event
+AWS Redshift Event Subscription
+AWS Redshift Reserved Node
+AWS Redshift Snapshot
+AWS Redshift Subnet Group Subnet Link
+AWS Region
+AWS Rekognition Collection
+AWS Rekognition Face
+AWS Rekognition Project
+AWS Rekognition Project Version
+AWS Rekognition Stream Processor
+AWS Route53 Domain
+AWS Route53 Health Check
+AWS Route53 Hosted Zone
+AWS Route53 Operation
+AWS Route53 Resource Record Set
+AWS Route53 Traffic Policy
+AWS Route53 Traffic Policy Record
+AWS Route53 Traffic Policy Version
+AWS S3 Access Grant
+AWS S3 Access Grants Instance
+AWS S3 Access Grants Location
+AWS S3 Access Point
+AWS S3 Bucket
+AWS S3 Directory Bucket
+AWS S3 Multi-Region Access Point
+AWS S3 Multi-Region Access Point Region
+AWS S3 Multi-Region Access Point Route
+AWS S3 Object Lambda Access Point
+AWS S3 Object Lambda Transformation
+AWS S3 Storage Lens Configuration
+AWS S3 Storage Lens Group
+AWS SES Configuration Set
+AWS SES Custom Verify Email Template
+AWS SES Identity
+AWS SES Policy
+AWS SES Receipt Filter
+AWS SES Receipt Rule
+AWS SES Receipt Rule Set
+AWS SES Sending Statistic
+AWS SES Template
+AWS SNS Subscription
+AWS SNS Topic
+AWS SQS Queue
+AWS SSM Command
+AWS SSM Command Invocation
+AWS SSM Document
+AWS SSM Document Version
+AWS SSM Hybrid Activation
+AWS SSM Instance Patch
+AWS SSM Inventory Entry
+AWS SSM Maintenance Window
+AWS SSM Maintenance Window Target
+AWS SSM Maintenance Window Task
+AWS SSM Ops Item
+AWS SSM Ops Item Topic Link
+AWS SSM Parameter
+AWS SSM Window Target Instance Link
+AWS SSM Window Task Target Link
+AWS SWF Activity Type
+AWS SWF Domain
+AWS SWF Workflow Type
+AWS SageMaker Algorithm
+AWS SageMaker Algorithm Valid Profile
+AWS SageMaker App
+AWS SageMaker Auto ML Job
+AWS SageMaker Auto ML Job SG LInk
+AWS SageMaker Auto ML Job Subnet Link
+AWS SageMaker Code Repository
+AWS SageMaker Compilation Job
+AWS SageMaker Domain
+AWS SageMaker Domain Def User SG Link
+AWS SageMaker Domain Subnet Link
+AWS SageMaker Endpoint
+AWS SageMaker Endpoint Config
+AWS SageMaker Experiment
+AWS SageMaker Flow Definition
+AWS SageMaker Human Task UI
+AWS SageMaker HyperParameter Tuning Job
+AWS SageMaker Labeling Job
+AWS SageMaker Model
+AWS SageMaker Model Package
+AWS SageMaker Model SG Link
+AWS SageMaker Model Subnet Link
+AWS SageMaker Notebook Instance
+AWS SageMaker Notebook Instance SG Link
+AWS SageMaker Proc Job Subnet Link
+AWS SageMaker Processing Job
+AWS SageMaker Processing Job SG Link
+AWS SageMaker Training Job
+AWS SageMaker Training Job SG Link
+AWS SageMaker Training Job Subnet Link
+AWS SageMaker Transform Job
+AWS SageMaker Trial
+AWS SageMaker Trial Component
+AWS SageMaker User Profile
+AWS SageMaker User Profile SG Link
+AWS SageMaker Workforce
+AWS SageMaker Workteam
+AWS Savings Plans Savings Plan
+AWS Secrets Manager Secret
+AWS Secrets Manager Secret Version
+AWS Security Hub
+AWS Service Catalog Action Artifact Link
+AWS Service Catalog Portf Budget Link
+AWS Service Catalog Portfolio
+AWS Service Catalog Portfolio Constraint
+AWS Service Catalog Portfolio Principal
+AWS Service Catalog Portfolio Share
+AWS Service Catalog Product
+AWS Service Catalog Product Budget Link
+AWS Service Catalog Product Portf Link
+AWS Service Catalog Product Version
+AWS Service Catalog Prov. Artifact
+AWS Service Catalog Provisioned Product
+AWS Service Catalog Service Action
+AWS Shield Attack
+AWS Shield Attack Vector
+AWS Shield Counter
+AWS Shield Protection
+AWS Shield Protection Group
+AWS Shield Protection Group Res. Link
+AWS Shield Protection Health Check Link
+AWS Shield SRT Log Bucket Link
+AWS Shield SubResource
+AWS Snowball Address
+AWS Snowball Cluster
+AWS Snowball Job
+AWS Step Functions Activity
+AWS Step Functions State Machine
+AWS Storage Gateway
+AWS Storage Gateway Cache Report
+AWS Storage Gateway File Share
+AWS Storage Gateway Local Disk
+AWS Storage Gateway Tape
+AWS Storage Gateway Tape Archive
+AWS Storage Gateway Tape Pool
+AWS Storage Gateway VTL Device
+AWS Storage Gateway Volume
+AWS Tape Recovery Point
+AWS Textract Adapter
+AWS Textract Adapter Version
+AWS Transcribe Call Analytics Category
+AWS Transcribe Call Analytics Job
+AWS Transcribe Language Model
+AWS Transcribe Med Transcription Job
+AWS Transcribe Transcription Job
+AWS Transcribe Vocabulary
+AWS Transcribe Vocabulary Filter
+AWS VPC
+AWS VPC Attachment
+AWS VPC Customer Gateway
+AWS VPC Egress Only Internet Gateway
+AWS VPC Endpoint
+AWS VPC Endpoint Connection Notification
+AWS VPC Endpoint Security Group Link
+AWS VPC Endpoint Service
+AWS VPC Endpoint Service Net ELB Link
+AWS VPC Endpoint Service Permission
+AWS VPC Endpoint Subnet Link
+AWS VPC Flow Log
+AWS VPC IPsec Tunnel
+AWS VPC Instance Classic Link
+AWS VPC Internet Gateway
+AWS VPC Internet Gateway Attachment
+AWS VPC Managed Prefix List
+AWS VPC NAT Gateway
+AWS VPC NAT Gateway Address
+AWS VPC Network ACL
+AWS VPC Network ACL Association
+AWS VPC Network ACL Entry
+AWS VPC Peering Connection
+AWS VPC Route
+AWS VPC Route Table
+AWS VPC Route Table Association
+AWS VPC Static Route
+AWS VPC Subnet
+AWS VPC TG Attachment Subnet Link
+AWS VPC TG Prefix List Reference
+AWS VPC TG Route Table Association
+AWS VPC TG Route Table Propagation
+AWS VPC Transit Gateway
+AWS VPC Transit Gateway Attachment
+AWS VPC Transit Gateway Route Table
+AWS VPC VPN Connection
+AWS VPC VPN Gateway Telemetry
+AWS VPC Virtual Private Gateway
+AWS Verified Access Endpoint
+AWS Verified Access Group
+AWS Verified Access Instance
+AWS Verified Access Trust Provider
+AWS Volume Recovery Point
+AWS WA Answer
+AWS WA Check
+AWS WA Custom Lens
+AWS WA Lens Review
+AWS WA Lens Review Improvement
+AWS WA Milestone
+AWS WA Profile
+AWS WA Review Template
+AWS WA Review Template Answer
+AWS WA Review Template Lens Review
+AWS WA Share Invitation
+AWS WA Workload
+AWS WA Workload Profile Link
+AWS WAF Condition
+AWS WAF Filter
+AWS WAF Rule
+AWS WAF Rule Group
+AWS WAF Rule Predicate
+AWS WAF Web ACL
+AWS WAF Web ACL Activated Rule
+AWS WAF Web ACL Resource Link
+AWS WorkSpace
+AWS WorkSpaces Bundle
+AWS WorkSpaces Directory
+AWS WorkSpaces IP Access Control Group
+AWS WorkSpaces Instance
+AWS X-Ray Encryption Config
+AWS X-Ray Group
+AWS X-Ray Sampling Rule

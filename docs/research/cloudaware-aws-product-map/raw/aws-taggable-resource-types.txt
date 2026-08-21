@@ -1,0 +1,317 @@
+AWS ACM Certificate
+AWS API Gateway API
+AWS API Gateway API Key
+AWS API Gateway Client Certificate
+AWS API Gateway Domain Name
+AWS API Gateway Stage
+AWS API Gateway Usage Plan
+AWS API Gateway VPC Link
+AWS Account
+AWS App Mesh
+AWS App Mesh Route
+AWS App Mesh Virtual Node
+AWS App Mesh Virtual Router
+AWS App Mesh Virtual Service
+AWS AppStream Fleet
+AWS AppStream Image
+AWS AppStream Image Builder
+AWS AppStream Stack
+AWS Athena Work Group
+AWS Backup Backup Plan
+AWS Backup Backup Vault
+AWS Bedrock Agent
+AWS Bedrock Custom Model
+AWS Bedrock Evaluation Job
+AWS Bedrock Flow
+AWS Bedrock Guardrail
+AWS Bedrock Imported Model
+AWS Bedrock Inference Profile
+AWS Bedrock Knowledge Base
+AWS Bedrock Model Customization Job
+AWS Bedrock Model Import Job
+AWS Bedrock Model Invocation Job
+AWS Bedrock Prompt
+AWS Bedrock Prompt Router
+AWS Bedrock Provisioned Model Throughput
+AWS Cloud WAN Attachment
+AWS Cloud WAN Connect Peer
+AWS Cloud WAN Connection
+AWS Cloud WAN Core Network
+AWS Cloud WAN Device
+AWS Cloud WAN Global Network
+AWS Cloud WAN Link
+AWS Cloud WAN Peering
+AWS Cloud WAN Site
+AWS CloudFormation Stack
+AWS CloudFormation Stack Set
+AWS CloudFront Distribution
+AWS CloudHSM Cluster
+AWS CloudMap Namespace
+AWS CloudMap Service
+AWS CloudTrail Channel
+AWS CloudTrail Dashboard
+AWS CloudTrail Event Data Store
+AWS CloudTrail Trail
+AWS CloudWatch Logs Delivery
+AWS CloudWatch Logs Delivery Dstn
+AWS CloudWatch Logs Delivery Source
+AWS CloudWatch Logs Destination
+AWS CloudWatch Logs Log Group
+AWS CloudWatch Metric Alarm
+AWS CodeBuild Project
+AWS CodeDeploy On-Premises Instance
+AWS CodePipeline Pipeline
+AWS Cognito Identity Pool
+AWS Cognito User Pool
+AWS Connect Agent Status
+AWS Connect Contact Flow
+AWS Connect Contact Flow Module
+AWS Connect Customer Object Type
+AWS Connect Customer Profiles Domain
+AWS Connect Hours Of Operation
+AWS Connect Outbound Campaigns Campaign
+AWS Connect Phone Number
+AWS Connect Queue
+AWS Connect Quick Connect
+AWS Connect Routing Profile
+AWS Connect Rule
+AWS Connect Security Profile
+AWS Connect Task Template
+AWS Connect Traffic Distribution Group
+AWS Connect User
+AWS Connect User Hierarchy Group
+AWS DAX Cluster
+AWS DMS Certificate
+AWS DMS Endpoint
+AWS DMS Migration Task
+AWS DMS Replication Instance
+AWS DMS Subnet Group
+AWS Data Pipeline Pipeline
+AWS Direct Connect Connection
+AWS Direct Connect LAG
+AWS Direct Connect Virtual Interface
+AWS Directory
+AWS DynamoDB Table
+AWS EBS Snapshot
+AWS EBS Volume
+AWS EC2 Auto Scaling Group
+AWS EC2 Capacity Reservation
+AWS EC2 DHCP Options
+AWS EC2 Elastic IP
+AWS EC2 Image
+AWS EC2 Instance
+AWS EC2 Key Pair
+AWS EC2 Launch Template
+AWS EC2 Network Interface
+AWS EC2 Reserved Instances
+AWS EC2 Security Group
+AWS EC2 Security Group Rule
+AWS EC2 Spot Fleet Request
+AWS EC2 Spot Instance Request
+AWS ECR Repository
+AWS ECS Cluster
+AWS ECS Container Instance
+AWS ECS Service
+AWS ECS Task
+AWS ECS Task Definition
+AWS EFS File System
+AWS EKS Cluster
+AWS EKS Cluster Config Map
+AWS EKS Cluster Daemon Set
+AWS EKS Cluster Deployment
+AWS EKS Cluster Endpoint
+AWS EKS Cluster Fargate Profile
+AWS EKS Cluster Namespace
+AWS EKS Cluster Node
+AWS EKS Cluster Node Group
+AWS EKS Cluster Pod
+AWS EKS Cluster Pod Disruption Budget
+AWS EKS Cluster Replica Set
+AWS EKS Cluster Role
+AWS EKS Cluster Role Binding
+AWS EKS Cluster Service
+AWS EKS Cluster Stateful Set
+AWS EKS Cluster Storage Class
+AWS ELB Load Balancer
+AWS ELB Load Balancer Target Group
+AWS EMR Cluster
+AWS ElastiCache Cluster
+AWS ElastiCache Cluster Snapshot
+AWS EventBridge Event Bus
+AWS EventBridge Rule
+AWS FSx Backup
+AWS FSx File System
+AWS Firewall Manager Apps List
+AWS Firewall Manager Protocols List
+AWS Firewall Manager Security Policy
+AWS Glacier Vault
+AWS GlobalAccelerator Accelerator
+AWS Glue Connection
+AWS Glue Crawler
+AWS Glue Database
+AWS Glue Development Endpoint
+AWS Glue Job
+AWS Glue ML Transform
+AWS Glue Trigger
+AWS GuardDuty Detector
+AWS GuardDuty IP List
+AWS GuardDuty Malware Protection Plan
+AWS IAM Access Analyzer
+AWS IAM ID Center Permission Set
+AWS IAM Instance Profile
+AWS IAM OpenID Connect Provider
+AWS IAM Policy
+AWS IAM Role
+AWS IAM SAML Provider
+AWS IAM Server Certificate
+AWS IAM User
+AWS IPAM
+AWS IPAM Pool
+AWS IPAM Public IPv4 Pool
+AWS IPAM Resource Discovery
+AWS IPAM Resource Discovery Association
+AWS IPAM Scope
+AWS KMS Key
+AWS Kendra Data Source
+AWS Kendra FAQ
+AWS Kendra Index
+AWS Kendra Query Suggestion Block List
+AWS Kendra Thesaurus
+AWS Kinesis Firehose Delivery Stream
+AWS Kinesis Stream
+AWS Lambda Function
+AWS Lex Bot
+AWS Lex Bot Alias
+AWS License Manager License Config
+AWS License Manager LinuxSubRegdProvider
+AWS License Manager Report Generator
+AWS License Manager User Sub IdProvider
+AWS License Manager User Sub Product
+AWS LicenseManager UserSubServerEndpoint
+AWS MQ Broker
+AWS MQ Configuration
+AWS MSK Cluster
+AWS MWAA Environment
+AWS MediaConnect Flow
+AWS MediaConvert Queue
+AWS MediaLive Channel
+AWS MediaLive Input
+AWS MediaLive Input Security Group
+AWS MediaLive Reservation
+AWS MediaPackage Channel
+AWS MediaPackage Origin Endpoint
+AWS MediaTailor Playback Configuration
+AWS NetworkFirewall Firewall
+AWS NetworkFirewall Firewall Policy
+AWS NetworkFirewall Rule Group
+AWS NetworkFirewall TLS InspectionConfig
+AWS OpenSearch Domain
+AWS OpsWorks Layer
+AWS OpsWorks Stack
+AWS Organization Account
+AWS QuickSight User
+AWS RAM Permission
+AWS RAM Resource Share
+AWS RDS Blue Green Deployment
+AWS RDS Cluster
+AWS RDS Cluster Parameter Group
+AWS RDS Cluster Snapshot
+AWS RDS Custom Engine Version
+AWS RDS Event Subscription
+AWS RDS Global Cluster
+AWS RDS Instance
+AWS RDS Option Group
+AWS RDS Parameter Group
+AWS RDS Reserved Instance
+AWS RDS Security Group (Classic)
+AWS RDS Shard Group
+AWS RDS Snapshot
+AWS RDS Subnet Group
+AWS RDS Tenant Database
+AWS RDS Tenant Database Snapshot
+AWS RDS Zero-ETL Integration
+AWS Redshift Cluster
+AWS Redshift Cluster Parameter Group
+AWS Redshift Cluster SG (Classic)
+AWS Redshift Cluster Subnet Group
+AWS Redshift Event Subscription
+AWS Redshift Snapshot
+AWS Route53 Domain
+AWS Route53 Health Check
+AWS Route53 Hosted Zone
+AWS S3 Bucket
+AWS S3 Storage Lens Configuration
+AWS S3 Storage Lens Group
+AWS SNS Topic
+AWS SQS Queue
+AWS SSM Document
+AWS SSM Hybrid Activation
+AWS SSM Maintenance Window
+AWS SSM Ops Item
+AWS SSM Parameter
+AWS SWF Domain
+AWS SageMaker App
+AWS SageMaker Domain
+AWS SageMaker Endpoint
+AWS SageMaker Endpoint Config
+AWS SageMaker HyperParameter Tuning Job
+AWS SageMaker Labeling Job
+AWS SageMaker Model
+AWS SageMaker Notebook Instance
+AWS SageMaker Training Job
+AWS SageMaker Transform Job
+AWS SageMaker User Profile
+AWS SageMaker Workteam
+AWS Savings Plans Savings Plan
+AWS Secrets Manager Secret
+AWS Service Catalog Portfolio
+AWS Service Catalog Product
+AWS Service Catalog Provisioned Product
+AWS Shield Protection
+AWS Shield Protection Group
+AWS Step Functions State Machine
+AWS Storage Gateway
+AWS Storage Gateway Cache Report
+AWS Storage Gateway File Share
+AWS Storage Gateway Tape
+AWS Storage Gateway Tape Pool
+AWS Storage Gateway Volume
+AWS Textract Adapter
+AWS Textract Adapter Version
+AWS Transcribe Language Model
+AWS Transcribe Med Transcription Job
+AWS Transcribe Transcription Job
+AWS Transcribe Vocabulary
+AWS Transcribe Vocabulary Filter
+AWS VPC
+AWS VPC Customer Gateway
+AWS VPC Egress Only Internet Gateway
+AWS VPC Endpoint
+AWS VPC Flow Log
+AWS VPC Internet Gateway
+AWS VPC Managed Prefix List
+AWS VPC NAT Gateway
+AWS VPC Network ACL
+AWS VPC Peering Connection
+AWS VPC Route Table
+AWS VPC Subnet
+AWS VPC Transit Gateway
+AWS VPC Transit Gateway Attachment
+AWS VPC Transit Gateway Route Table
+AWS VPC VPN Connection
+AWS VPC Virtual Private Gateway
+AWS Verified Access Endpoint
+AWS Verified Access Group
+AWS Verified Access Instance
+AWS Verified Access Trust Provider
+AWS WA Custom Lens
+AWS WA Profile
+AWS WA Review Template
+AWS WA Workload
+AWS WAF Rule
+AWS WAF Rule Group
+AWS WAF Web ACL
+AWS WorkSpace
+AWS WorkSpaces Instance
+AWS X-Ray Group
+AWS X-Ray Sampling Rule
