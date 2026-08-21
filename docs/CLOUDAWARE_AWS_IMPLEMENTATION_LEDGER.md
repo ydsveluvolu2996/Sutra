@@ -11,6 +11,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 |---|---|
 | Date | 2026-08-21 (Asia/Kolkata) |
 | Baseline commit | `6fdddfdb0f3c739fe8dfb3598045e483ac07d916` |
+| Final implementation commit | `e8c87e25d4a6c9c287540103bb0ac1a60aed9956` |
 | Branch | `develop` only |
 | Vertical | Milestone 0A — canonical AWS catalog and tenant-scoped AWS Navigator over the existing durable CMDB projection |
 | Measurable outcome | Added a deterministic catalog with 18 categories, 114 services, 986 reference resource types, and one explicit Sutra SSM extension; added authenticated category, service, resource-type, and scoped search routes without moving AWS SDK access outside the collector. |
@@ -23,7 +24,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 | External acceptance | `PENDING_EXTERNAL_ACCEPTANCE` — the available Chrome session has no signed-in Sutra application tab, and no disposable multi-account/multi-partition AWS fixture is available. Local route, rendered-page, build, and security evidence do not replace those checks. |
 | Known limitations | Broader application-wide search and organization-scale account navigation remain a separate Milestone 0 vertical; catalog rows do not claim unimplemented VPC or other adapters. |
 | Next slice | After this checkpoint and its exact standing-PR CI pass: organization-scale Navigator/search scope, then the complete VPC networking vertical. |
-| Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); exact checkpoint SHA and CI run will be recorded after `pnpm work:save` and the run completes. |
+| Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); [exact CI run 32457823809](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32457823809) and [Kubernetes/supply-chain run 32457823732](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32457823732) passed for `e8c87e25d4a6c9c287540103bb0ac1a60aed9956`. |
 
 ### Verification record
 
@@ -38,6 +39,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 | Build/rendered routes | Production build passed with the Navigator API and page routes present; 4 rendered-route checks passed, including anonymous private-route redirects |
 | Migrations / CloudFormation | Not applicable: no migration, registry, collector permission, or template change |
 | Signed-in browser evidence | Pending externally; Chrome is running but has no signed-in Sutra application tab |
+| Standing PR CI | Exact-SHA resolution, application quality/build, collector/CloudFormation/PostgreSQL, scanner image/vulnerability, all six offline shards, final aggregate, and the separate Kubernetes/supply-chain workflow passed |
 
 See `docs/AWS_CMDB_CATALOG_AND_NAVIGATOR.md` for the generated-source model,
 route contract, count semantics, and explicit limits.
