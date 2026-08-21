@@ -25,6 +25,7 @@ export type NavKey =
   | "overview"
   | "customers"
   | "cmdb"
+  | "cmdb_navigator"
   | "changes"
   | "findings"
   | "findings_exceptions"
@@ -173,6 +174,7 @@ export const navGroups: readonly NavGroup[] = [
     label: "CMDB",
     items: [
       { key: "cmdb", label: "Resource inventory", href: "/cmdb", capabilities: readConnection },
+      { key: "cmdb_navigator", label: "AWS Navigator", href: "/cmdb/navigator", capabilities: readWorkspace },
       { key: "changes", label: "Change history", href: "/changes", capabilities: readConnection },
       { key: "cmdb_dependencies", label: "Dependencies", href: "/cmdb/dependencies", capabilities: readConnection },
       { key: "cmdb_assets", label: "Custom assets", href: "/cmdb/assets", capabilities: readConnection },
