@@ -8,6 +8,13 @@ Tracker last reconciled against `main`: **2026-08-06 at `92a0084`** — see
 [Implementation record — 2026-08-06](#implementation-record--2026-08-06). No row
 changed maturity at that reconciliation.
 
+Latest `develop` vertical checkpoint: **2026-08-21 at
+`1844643967bcc9872fffa14db351427cc4bedfe5`** — FND-01 was reconciled to the
+current AWS CUDOS v5.9.1 definition (19 sheets, 409 visuals, 142 controls) and
+gained truth-preserving Bedrock token/cache usage and ratio surfaces. Its
+maturity remains `LOCAL_VERTICAL_CANDIDATE`; no main merge, deployment, provider
+acceptance, or live acceptance is claimed.
+
 Current release scope confirmed: **2026-08-02 — build and acceptance target is
 the 27 AWS-backed dashboards. ADD-02 Azure CID and ADD-03 GCP CID remain in the
 official product catalog but are explicitly excluded from this release build at
@@ -96,7 +103,7 @@ engine-only or absent; production activation and acceptance gaps remain explicit
 
 | ID | Official dashboard | Sutra ID | Current maturity | Immediate proof or gap |
 |---|---|---|---|---|
-| FND-01 | CUDOS Dashboard | `cudos` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-01-cudos.md): the pinned 19-sheet/407-visual/142-control definition, monthly/UTC-weekly/daily trends, FOCUS category rankings, all official service-family modules and active CUR2 completeness disclosure are present; provider telemetry/recommendations, commitment expiry/purchase context, exact layout parity, controlled two-tenant reconciliation and live acceptance remain. |
+| FND-01 | CUDOS Dashboard | `cudos` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-01-cudos.md): the pinned v5.9.1 19-sheet/409-visual/142-control definition, monthly/UTC-weekly/daily trends, FOCUS category rankings, all official service-family modules, compatible-unit Bedrock token/cache usage and ratios, and active CUR2 completeness disclosure are present; provider telemetry/recommendations, inferred cache savings, commitment expiry/purchase context, exact layout parity, controlled two-tenant reconciliation and live acceptance remain. |
 | FND-02 | Cost Intelligence Dashboard | `cost_intelligence_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-02-cost-intelligence.md): the pinned 10-sheet/77-visual/44-control definition, exact currency-separated summaries/trends/MoM spend, bounded explorer, commitment expiry and native per-sheet coverage are present; compute/storage quantity completeness, full RI/SP evidence, all OPTICS controls, usage pivot, exact-tree, controlled two-tenant/provider reconciliation and live acceptance remain. |
 | FND-03 | KPI and Modernization Dashboard | `kpi_dashboard` | `LOCAL_VERTICAL_CANDIDATE` | [G0–G6 evidence](finops-cid-evidence/FND-03-kpi-modernization.md): the pinned v2.2.1 10-sheet/91-visual/94-control definition, all 19 governed formulas/goals, account/payer/period filters, sheet-specific native views and corrected official gp3/one-year formulas are present; goal mutation UI, multi-generation MoM, authoritative inventory/activity/compatibility/pricing evidence, exact-tree, controlled provider reconciliation and live acceptance remain. |
 | ADV-01 | Trusted Advisor Organizational Dashboard | `trusted_advisor_organizational` | `PARTIAL_PIPELINE` | [G0–G6 evidence](finops-cid-evidence/ADV-01-trusted-advisor-organizational.md) and [orchestration contract](finops-cid-evidence/ADV-01-standard-orchestration-contract.md): the pinned v4.0.1 inventory maps 11 sheets, 147 visuals and 22 controls; native category/suppression analysis and source-safe sheet navigation exist. The credential-owning fully paged Organizations adapter, exact signed broker route, dedicated RSA-3072 digest-signing key, app-side KMS verifier, immutable `standard-2026-08.2` least-privilege role, protected activation POST/UI control, exact-attempt evidence read, bounded member discovery, and all three durable handlers are implemented and locally tested. The finalizer is queued only after terminal fan-out and transient member failures retain durable retries. Production secret rotation, 08.2 role/source-contract activation, eligible-Support-plan reconciliation, authoritative TA Priority/Well-Architected sources, conditional Security Hub classification and live acceptance remain. Standard checks are never substituted for provider-only datasets. |

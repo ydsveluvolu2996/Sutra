@@ -19,6 +19,21 @@ It is deliberately conservative: a dashboard is not promoted merely because isol
 
 The WIP snapshot contains every uncommitted file that existed when work stopped: 185 files, 10,958 insertions and 432 deletions. It was pushed intentionally as one WIP safety commit so no agent output is only local.
 
+## Mac Mini continuation update — 2026-08-21
+
+The historical handoff point above remains provenance. Current work now follows
+the repository's single-branch policy on `develop`, through standing PR #78
+(`develop → main`). FND-01 CUDOS was reconciled at feature commit
+`1844643967bcc9872fffa14db351427cc4bedfe5` to the current AWS v5.9.1 artifact:
+19 sheets, 409 visuals, 142 controls, plus canonical Bedrock token/cache usage
+and compatible-unit cache read/write ratios. Missing classes remain unavailable
+and inferred cache savings remain withheld. Focused CUDOS/shared UI tests (50),
+migration-registry tests (7), root typecheck, focused ESLint, secret scan, and
+diff check passed. No collector operation, IAM permission, migration, main
+merge, deployment, provider acceptance, or live acceptance was added or
+claimed. Continue next with FND-02 only after PR #78 is green for the exact
+checkpoint and the isolated FND-01 evidence commit is pushed.
+
 ## Snapshot health
 
 These checks passed against `b75f751` after all agents were stopped:
@@ -48,7 +63,7 @@ The word **completed** below means `LOCAL_VERTICAL_CANDIDATE`: the dashboard's l
 
 | ID and dashboard | What is built and wired now | Local evidence / checkpoint | Still required before production |
 |---|---|---|---|
-| FND-01 CUDOS | Pinned 19-sheet/407-visual/142-control model; monthly, UTC-weekly and daily trends; FOCUS rankings; service-family modules; CUR2 completeness disclosure. | `docs/finops-cid-evidence/FND-01-cudos.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Provider telemetry/recommendations, commitment context, exact-layout parity, controlled two-tenant reconciliation, live acceptance and shared release gates. |
+| FND-01 CUDOS | Pinned v5.9.1 19-sheet/409-visual/142-control model; monthly, UTC-weekly and daily trends; FOCUS rankings; service-family modules; compatible-unit Bedrock token/cache usage and ratios; CUR2 completeness disclosure. | Feature `1844643`; `docs/finops-cid-evidence/FND-01-cudos.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Provider telemetry/recommendations, inferred cache savings, commitment context, exact-layout parity, controlled two-tenant reconciliation, live acceptance and shared release gates. |
 | FND-02 Cost Intelligence | Pinned 10-sheet/77-visual/44-control model; currency-separated summaries/trends/MoM, bounded explorer, commitment expiry and per-sheet coverage. | `docs/finops-cid-evidence/FND-02-cost-intelligence.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Complete compute/storage quantities, RI/SP and OPTICS evidence, usage pivot, exact-tree, controlled reconciliation and live acceptance. |
 | FND-03 KPI and Modernization | Pinned v2.2.1 10-sheet/91-visual/94-control model; 19 governed formulas/goals; account/payer/period filters; native sheet views; corrected gp3 and one-year formulas. | `docs/finops-cid-evidence/FND-03-kpi-modernization.md`; tracker state `LOCAL_VERTICAL_CANDIDATE`. | Goal mutation UI, multi-generation MoM and authoritative inventory/activity/compatibility/pricing evidence; exact-tree, reconciliation and live acceptance. |
 | ADV-02 Compute Optimizer | Eight-export materialization; replay-safe launch/activation ledgers; exact-ID barrier; version-bound S3/CSVW reader; all-Region coordinator; immutable generation persistence; scheduler and all four handlers; signed STS activation; same-tenant API; 14-purpose exact-micros UI. | Feature `f96b73a`; tracker `9561050`; `docs/finops-cid-evidence/ADV-02-compute-optimizer.md`. | Activate exact `.8.5` IAM/broker secrets, controlled multi-Region provider reconciliation, two-tenant/live acceptance, authorized QuickSight geometry and fixed-tree release gates. |
