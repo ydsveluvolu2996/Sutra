@@ -11,6 +11,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 |---|---|
 | Date | 2026-08-21 (Asia/Kolkata) |
 | Baseline commit | `e3224404de15c0447b215fe1c82297e24d45c677` |
+| Final implementation commit | `b45b05fbfdba7280f3993d375e7d340f7cae0a67` |
 | Branch | `develop` only |
 | Vertical | Milestone 1A — first-class VPC route, association, ACL-entry, and gateway-attachment projection from already-authorized EC2 reads |
 | Measurable outcome | Promoted five captured VPC object types from catalog-only to implemented normalized resources, scoped counts/search/Resource 360, and field-backed topology without adding an AWS SDK operation or permission. |
@@ -25,7 +26,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 | Migrations | Not applicable; no database or migration-registry file changes. |
 | External acceptance | `PENDING_EXTERNAL_ACCEPTANCE` — no disposable multi-Region/two-tenant AWS account evidence and no signed-in Sutra Chrome session are available. |
 | Known limitations / next slice | NAT/transit gateways, endpoints, peering, VPN, Direct Connect, and propagation require new exact IAM operations. A valid standard successor cannot be created until reserved FOCUS `.8.19` is integrated; this slice does not steal or skip that reservation. |
-| Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); checkpoint SHA and exact workflows pending save. |
+| Standing PR / CI | [PR #77](https://github.com/ydsveluvolu2996/Sutra/pull/77); [exact CI run 32461752486](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32461752486) and [Kubernetes/supply-chain run 32461752428](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32461752428) passed for `b45b05fbfdba7280f3993d375e7d340f7cae0a67`. |
 
 ### Verification record
 
@@ -38,6 +39,7 @@ acceptance, and absent or failed evidence is never reported as zero.
 | Migration diff | Passed / not applicable; no database schema, migration, migrator, or registry file changed |
 | Lint / secret scan / build / rendered routes | Affected and full ESLint passed; secret scan passed for 2,666 files; production build passed; rendered routes passed 4/4 |
 | Signed-in browser evidence | Pending externally; the available Chrome session has no Sutra application tab |
+| Standing PR CI | Exact-SHA resolution, application quality/build, collector/CloudFormation/PostgreSQL, scanner image/vulnerability, all six offline shards, final aggregate, and the separate Kubernetes/supply-chain workflow passed for the implementation commit |
 
 The bounded reuse and contract decisions are recorded in
 `docs/CLOUDAWARE_AWS_VPC_SUBRESOURCE_CLOSURE.md`.

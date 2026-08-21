@@ -119,9 +119,9 @@ new requirement.
 
 | Field | Value |
 |---|---|
-| Feature commit | Pending |
-| Feature pushed and remote SHA matched | Pending |
-| Evidence file updated | Pending |
-| Execution ledger updated | Pending |
-| Evidence commit / exact CI | Pending |
+| Feature commit | `b45b05fbfdba7280f3993d375e7d340f7cae0a67` |
+| Feature pushed and remote SHA matched | Yes; local and `origin/develop` matched after `pnpm work:save` |
+| Evidence file updated | Yes; this worksheet records the final local and exact implementation-CI evidence |
+| Execution ledger updated | Yes; `docs/CLOUDAWARE_AWS_IMPLEMENTATION_LEDGER.md` records the implementation SHA and exact workflow URLs |
+| Evidence commit / exact CI | Evidence commit pending. Implementation [CI run 32461752486](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32461752486) and [Kubernetes/supply-chain run 32461752428](https://github.com/ydsveluvolu2996/Sutra/actions/runs/32461752428) passed for the exact feature SHA. |
 | Remaining external gates | Disposable multi-Region/two-tenant AWS reconciliation and signed-in browser evidence |
