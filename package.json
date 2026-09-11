@@ -86,7 +86,7 @@
     "@aws-sdk/client-secrets-manager": "3.1112.0",
     "drizzle-orm": "0.45.2",
     "miniflare": "4.20260730.0",
-    "next": "16.3.1",
+    "next": "16.3.3",
     "pg": "8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
