@@ -108,7 +108,7 @@
     "tailwindcss": "4.3.3",
     "typescript": "5.9.3",
     "vinext": "0.0.50",
-    "vite": "8.2.1"
+    "vite": "8.2.4"
   },
   "type": "module"
 }
